@@ -28,12 +28,15 @@ allowed_origins = [
     "http://localhost:5173",  # Local Vite dev
     "http://localhost:3000",  # Alternative local
     "https://client-pharmacy-frontend.vercel.app",  # Production Vercel
-    "https://*.vercel.app",   # Vercel preview deployments
 ]
+
+# Allow all Vercel preview deployments
+allow_origin_regex = r"https://.*\.vercel\.app"
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
+    allow_origin_regex=allow_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
