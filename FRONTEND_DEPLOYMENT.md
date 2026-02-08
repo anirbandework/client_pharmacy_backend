@@ -2,6 +2,11 @@
 
 Quick guide to deploy your React + Vite frontend to Vercel.
 
+**✅ Backend is Live!** Your Railway backend URL will be something like:
+`https://web-production-xxxx.up.railway.app`
+
+Find your exact URL in Railway Dashboard → Your Service → Settings → Domains
+
 ---
 
 ## 📁 Files to Create in Your Frontend Project
