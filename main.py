@@ -23,12 +23,12 @@ app = FastAPI(
     version="2.0.0"
 )
 
-# CORS Configuration - Update with your frontend URL
+# CORS Configuration
 allowed_origins = [
     "http://localhost:5173",  # Local Vite dev
     "http://localhost:3000",  # Alternative local
+    "https://client-pharmacy-frontend.vercel.app",  # Production Vercel
     "https://*.vercel.app",   # Vercel preview deployments
-    # Add your production Vercel domain after deployment
 ]
 
 app.add_middleware(

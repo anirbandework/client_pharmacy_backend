@@ -172,11 +172,13 @@ Go to your backend code and update `main.py`:
 ```python
 allowed_origins = [
     "http://localhost:5173",
-    "https://pharmacy-frontend.vercel.app",  # Your actual Vercel URL
+    "https://client-pharmacy-frontend.vercel.app",  # Your actual Vercel URL
 ]
 ```
 
-Commit and push - Railway will auto-deploy!
+**Already done!** ✅ Your backend is configured with this URL.
+
+If you change domains, commit and push - Railway will auto-deploy!
 
 ### 3. Test the Connection
 
