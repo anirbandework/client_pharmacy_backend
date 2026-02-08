@@ -1,10 +1,22 @@
 # 🚀 Deployment Guide - Railway + Vercel
 
-Complete guide to deploy your Pharmacy Management System for 500 users.
+Complete guide to deploy your Pharmacy Management System.
 
-**Total Cost: $20/month**
+## 💰 Pricing Plans
+
+### Testing/Development (Hobby Plan)
+**Cost: $5/month**
+- Backend (Railway Hobby): $5/month
+- Frontend (Vercel): FREE
+- Perfect for: Testing, UAT, demos, client review
+- Handles: 10-20 concurrent users
+
+### Production (Pro Plan)
+**Cost: $20/month**
 - Backend (Railway Pro): $20/month
 - Frontend (Vercel): FREE
+- Perfect for: Live production with 500+ users
+- Handles: 500 concurrent users
 
 ---
 
@@ -74,15 +86,30 @@ WHATSAPP_TOKEN=your_token_here
 WHATSAPP_FROM_NUMBER=+14155238886
 ```
 
-### Step 6: Upgrade to Pro Plan
+### Step 6: Choose Your Plan
+
+#### Option A: Hobby Plan (Testing) - $5/month ✅ RECOMMENDED FOR NOW
+
+**Stay on Hobby Plan** - No action needed!
+- 512MB RAM, 1 vCPU
+- PostgreSQL + Redis included
+- Handles 10-20 concurrent users
+- Perfect for testing and demos
+- May sleep after inactivity (wakes instantly)
+
+**When to use**: Testing phase, UAT, client demos
+
+#### Option B: Pro Plan (Production) - $20/month
 
 1. Go to **Project Settings → Plan**
 2. Select **"Pro Plan" ($20/month)**
 3. This gives you:
-   - 8GB RAM
-   - 8 vCPU
+   - 8GB RAM, 8 vCPU
    - Handles 500 concurrent users
-   - Always-on workers
+   - Always-on (no sleeping)
+   - Priority support
+
+**When to upgrade**: Going live, 50+ users, need 24/7 uptime
 
 ### Step 7: Deploy!
 
@@ -427,10 +454,16 @@ vercel env pull
 
 ## 🎉 You're Live!
 
-Your Pharmacy Management System is now running in production!
+Your Pharmacy Management System is now deployed!
 
-**Cost**: $20/month for 500 users
-**Uptime**: 99.9%+
-**Scalability**: Ready to grow
+### Current Setup (Hobby Plan)
+**Cost**: $5/month
+**Users**: 10-20 concurrent
+**Perfect for**: Testing & demos
+
+### When Ready for Production
+1. Go to Railway → Project Settings → Plan
+2. Upgrade to Pro Plan ($20/month)
+3. Get 500 concurrent users + 24/7 uptime
 
 Need help? Check Railway and Vercel documentation or contact support.
