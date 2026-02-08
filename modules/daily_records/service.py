@@ -96,11 +96,16 @@ async def import_excel_data(file: UploadFile, db: Session) -> ExcelImportRespons
                 if not date_val:
                     continue
                     
-                # Parse date
+                # Parse date (handle Excel serial numbers)
                 if isinstance(date_val, datetime):
                     record_date = date_val.date()
                 elif isinstance(date_val, date):
                     record_date = date_val
+                elif isinstance(date_val, (int, float)):
+                    # Excel serial number (days since 1900-01-01)
+                    from datetime import timedelta
+                    excel_epoch = datetime(1899, 12, 30)  # Excel's epoch
+                    record_date = (excel_epoch + timedelta(days=date_val)).date()
                 else:
                     record_date = datetime.strptime(str(date_val), '%Y-%m-%d').date()
                 
@@ -114,14 +119,14 @@ async def import_excel_data(file: UploadFile, db: Session) -> ExcelImportRespons
                     'date': record_date,
                     'day': str(sheet.cell(row=row_num, column=2).value or ''),
                     'cash_balance': float(sheet.cell(row=row_num, column=3).value or 1000),
-                    'no_of_bills': int(sheet.cell(row=row_num, column=5).value) if sheet.cell(row=row_num, column=5).value else None,
-                    'actual_cash': float(sheet.cell(row=row_num, column=7).value) if sheet.cell(row=row_num, column=7).value else None,
-                    'online_sales': float(sheet.cell(row=row_num, column=8).value) if sheet.cell(row=row_num, column=8).value else None,
-                    'unbilled_sales': float(sheet.cell(row=row_num, column=10).value) if sheet.cell(row=row_num, column=10).value else None,
-                    'software_figure': float(sheet.cell(row=row_num, column=11).value) if sheet.cell(row=row_num, column=11).value else None,
-                    'cash_reserve': float(sheet.cell(row=row_num, column=14).value) if sheet.cell(row=row_num, column=14).value else None,
+                    'no_of_bills': int(sheet.cell(row=row_num, column=5).value or 0),
+                    'actual_cash': float(sheet.cell(row=row_num, column=7).value or 0),
+                    'online_sales': float(sheet.cell(row=row_num, column=8).value or 0),
+                    'unbilled_sales': float(sheet.cell(row=row_num, column=10).value or 0),
+                    'software_figure': float(sheet.cell(row=row_num, column=11).value or 0),
+                    'cash_reserve': float(sheet.cell(row=row_num, column=14).value or 0),
                     'reserve_comments': str(sheet.cell(row=row_num, column=15).value or ''),
-                    'expense_amount': float(sheet.cell(row=row_num, column=17).value) if sheet.cell(row=row_num, column=17).value else None,
+                    'expense_amount': float(sheet.cell(row=row_num, column=17).value or 0),
                     'notes': str(sheet.cell(row=row_num, column=15).value or ''),
                     'created_by': 'excel_import'
                 }
