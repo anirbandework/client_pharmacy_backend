@@ -15,7 +15,8 @@ python-dotenv==1.0.0
 matplotlib==3.7.2
 seaborn==0.12.2
 PyPDF2==3.0.1
-passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
+passlib==1.7.4
 python-jose[cryptography]==3.3.0
 psycopg2-binary==2.9.9
 gunicorn==21.2.0
