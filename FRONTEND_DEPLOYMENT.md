@@ -2,10 +2,8 @@
 
 Quick guide to deploy your React + Vite frontend to Vercel.
 
-**✅ Backend is Live!** Your Railway backend URL will be something like:
-`https://web-production-xxxx.up.railway.app`
-
-Find your exact URL in Railway Dashboard → Your Service → Settings → Domains
+**✅ Backend is Live!** Your Railway backend URL:
+`https://web-production-3ca8.up.railway.app`
 
 ---
 
@@ -43,7 +41,7 @@ Find your exact URL in Railway Dashboard → Your Service → Settings → Domai
 ### 2. Create `.env.production` (in frontend root)
 
 ```env
-VITE_API_URL=https://your-app.railway.app
+VITE_API_URL=https://web-production-3ca8.up.railway.app
 ```
 
 ### 3. Update Your API Configuration
@@ -127,7 +125,7 @@ api.get('/api/customers')
 
 4. **Add Environment Variable**
    - Click "Environment Variables"
-   - Add: `VITE_API_URL` = `https://your-app.railway.app`
+   - Add: `VITE_API_URL` = `https://web-production-3ca8.up.railway.app`
    - Apply to: Production, Preview, Development
 
 5. **Deploy**
@@ -199,7 +197,7 @@ VITE_API_URL=http://localhost:8000
 
 ### Production (Vercel Dashboard)
 ```env
-VITE_API_URL=https://your-app.railway.app
+VITE_API_URL=https://web-production-3ca8.up.railway.app
 ```
 
 ### Accessing in Code
@@ -402,7 +400,8 @@ Your frontend is now deployed on Vercel!
 - Preview deployments
 
 **Your URLs**:
-- Production: `https://your-app.vercel.app`
-- API: `https://your-app.railway.app`
+- Backend API: `https://web-production-3ca8.up.railway.app`
+- API Docs: `https://web-production-3ca8.up.railway.app/docs`
+- Frontend: `https://your-app.vercel.app` (after deployment)
 
 Need help? Check Vercel docs: https://vercel.com/docs
