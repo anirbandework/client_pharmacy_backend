@@ -13,6 +13,10 @@ from modules.daily_records.models import DailyRecord, RecordModification
 from modules.customer_tracking.models import *
 from modules.stock_audit.models import *
 from modules.auth.models import Admin, Shop, Staff
+from modules.invoice_analyzer.models import (
+    PurchaseInvoice, PurchaseInvoiceItem, ItemSale, 
+    ExpiryAlert, MonthlyInvoiceSummary
+)
 
 # Create all tables
 Base.metadata.create_all(bind=engine)
@@ -48,7 +52,7 @@ app.add_middleware(ShopContextMiddleware)
 # Module routes
 app.include_router(auth_router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(customer_router, prefix="/api/customers", tags=["Customer Tracking"])
-app.include_router(invoice_router, prefix="/api/invoices", tags=["Invoice Analyzer"])
+app.include_router(invoice_router, prefix="/api/invoices", tags=["Purchase Invoice Analyzer"])
 app.include_router(stock_router, prefix="/api/stock", tags=["Stock Audit"])
 app.include_router(daily_records_router, prefix="/api/daily-records", tags=["Daily Records"])
 app.include_router(profit_router, prefix="/api/profit", tags=["Profit Analysis"])
@@ -67,7 +71,7 @@ async def list_modules():
         "modules": {
             "auth": "Multi-tenant authentication with admin/shop/staff hierarchy",
             "customer_tracking": "Regular customer tracking with reminders",
-            "invoice_analyzer": "Monthly invoice analysis with color coding",
+            "invoice_analyzer": "Purchase invoice tracking with AI-powered movement analysis, expiry alerts, and color-coded status monitoring",
             "stock_audit": "Random section auditing with discrepancy tracking",
             "daily_records": "Robust daily business recording with modification tracking",
             "profit_analysis": "Bill-wise profit margin calculation"

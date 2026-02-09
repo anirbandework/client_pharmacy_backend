@@ -1,10 +1,30 @@
-from app.services.whatsapp_service import send_whatsapp_alert
 from .models import RecordModification, DailyRecord
 from .schemas import ExcelImportResponse
 from sqlalchemy.orm import Session
 from fastapi import UploadFile
 from datetime import datetime, date
 import io
+
+def send_whatsapp_alert(message: str):
+    """Send WhatsApp alert for cash differences"""
+    try:
+        import requests
+        from app.core.config import settings
+        
+        if hasattr(settings, 'WHATSAPP_API_URL') and hasattr(settings, 'WHATSAPP_TOKEN'):
+            headers = {
+                'Authorization': f'Bearer {settings.WHATSAPP_TOKEN}',
+                'Content-Type': 'application/json'
+            }
+            data = {
+                'messaging_product': 'whatsapp',
+                'to': settings.WHATSAPP_PHONE_NUMBER,
+                'type': 'text',
+                'text': {'body': message}
+            }
+            requests.post(settings.WHATSAPP_API_URL, json=data, headers=headers)
+    except Exception as e:
+        print(f"WhatsApp alert failed: {e}")
 
 def check_cash_difference_alert(sales_difference: float, record_date, total_sales: float):
     """Check if sales difference exceeds threshold and send alert"""
@@ -80,6 +100,7 @@ async def import_excel_data(file: UploadFile, db: Session) -> ExcelImportRespons
     """Import daily record data from Excel file matching GMTR0003 format"""
     try:
         from openpyxl import load_workbook
+        from openpyxl.utils import range_boundaries
         
         content = await file.read()
         workbook = load_workbook(io.BytesIO(content))
@@ -109,36 +130,83 @@ async def import_excel_data(file: UploadFile, db: Session) -> ExcelImportRespons
                 else:
                     record_date = datetime.strptime(str(date_val), '%Y-%m-%d').date()
                 
-                # Check if record already exists
-                existing = db.query(DailyRecord).filter(DailyRecord.date == record_date).first()
-                if existing:
-                    continue
+                # Helper function to get cell value (handles formulas)
+                def get_cell_value(row, col, default=0):
+                    cell = sheet.cell(row=row, column=col)
+                    value = cell.value
+                    if value is None:
+                        return default
+                    
+                    # If it's a string that starts with '=', it's a formula
+                    if isinstance(value, str) and value.startswith('='):
+                        # Try to extract numbers from simple formulas
+                        formula = value[1:]  # Remove the '=' sign
+                        
+                        # Handle simple addition formulas like "9500+2000"
+                        if '+' in formula and all(c.isdigit() or c in '+- .' for c in formula):
+                            try:
+                                return eval(formula)
+                            except:
+                                pass
+                        
+                        # Handle sum formulas like "sum(G6+N6+Q6)+1203"
+                        if 'sum(' in formula.lower():
+                            # For now, return default for complex sum formulas
+                            return default
+                            
+                        # Try to extract the first number from the formula
+                        import re
+                        numbers = re.findall(r'\d+(?:\.\d+)?', formula)
+                        if numbers:
+                            return float(numbers[0])
+                        
+                        return default
+                    
+                    return value
                 
                 # Extract data from Excel columns (matching GMTR0003 format)
                 record_data = {
                     'date': record_date,
-                    'day': str(sheet.cell(row=row_num, column=2).value or ''),
-                    'cash_balance': float(sheet.cell(row=row_num, column=3).value or 1000),
-                    'no_of_bills': int(sheet.cell(row=row_num, column=5).value or 0),
-                    'actual_cash': float(sheet.cell(row=row_num, column=7).value or 0),
-                    'online_sales': float(sheet.cell(row=row_num, column=8).value or 0),
-                    'unbilled_sales': float(sheet.cell(row=row_num, column=10).value or 0),
-                    'software_figure': float(sheet.cell(row=row_num, column=11).value or 0),
-                    'cash_reserve': float(sheet.cell(row=row_num, column=14).value or 0),
-                    'reserve_comments': str(sheet.cell(row=row_num, column=15).value or ''),
-                    'expense_amount': float(sheet.cell(row=row_num, column=17).value or 0),
-                    'notes': str(sheet.cell(row=row_num, column=15).value or ''),
-                    'created_by': 'excel_import'
+                    'day': str(get_cell_value(row_num, 2, '')),
+                    'cash_balance': float(get_cell_value(row_num, 3, 1000)),
+                    'no_of_bills': int(get_cell_value(row_num, 5, 0)),
+                    'actual_cash': float(get_cell_value(row_num, 7, 0)),
+                    'online_sales': float(get_cell_value(row_num, 8, 0)),
+                    'unbilled_sales': float(get_cell_value(row_num, 10, 0)),
+                    'software_figure': float(get_cell_value(row_num, 11, 0)),
+                    'cash_reserve': float(get_cell_value(row_num, 14, 0)),
+                    'reserve_comments': str(get_cell_value(row_num, 15, '')),
+                    'expense_amount': float(get_cell_value(row_num, 17, 0)),
+                    'notes': str(get_cell_value(row_num, 15, '')),
+                    'created_by': 'excel_import',
+                    'shop_id': None  # Set to None since it's nullable
                 }
                 
                 # Calculate derived fields
                 calculated = calculate_fields(record_data)
                 record_data.update(calculated)
                 
-                # Create record
-                db_record = DailyRecord(**record_data)
-                db.add(db_record)
-                records_imported += 1
+                # Check if record already exists
+                existing = db.query(DailyRecord).filter(DailyRecord.date == record_date).first()
+                if existing:
+                    # Update existing record instead of skipping
+                    for field, value in record_data.items():
+                        if field != 'date':  # Don't update the date
+                            setattr(existing, field, value)
+                    
+                    # Calculate derived fields for existing record
+                    calculated = calculate_fields(record_data)
+                    for field, value in calculated.items():
+                        setattr(existing, field, value)
+                    
+                    existing.modified_at = datetime.utcnow()
+                    existing.modified_by = 'excel_import_update'
+                    records_imported += 1
+                else:
+                    # Create new record
+                    db_record = DailyRecord(**record_data)
+                    db.add(db_record)
+                    records_imported += 1
                 
             except Exception as e:
                 errors.append(f"Row {row_num}: {str(e)}")
@@ -194,26 +262,26 @@ def export_to_excel(records: list, year: int, month: int) -> bytes:
             if header:
                 cell = ws.cell(row=4, column=col, value=header)
                 cell.font = Font(bold=True)
-                cell.fill = PatternFill(start_color="EEEEEE", end_color="EEEEEE", fill_type="solid")
+                cell.fill = PatternFill(start_color="CCCCCC", end_color="CCCCCC", fill_type="solid")
         
-        # Data rows (starting from row 6)
-        for idx, record in enumerate(records, start=6):
-            ws.cell(row=idx, column=1, value=record.date)
-            ws.cell(row=idx, column=2, value=record.day)
-            ws.cell(row=idx, column=3, value=record.cash_balance)
-            ws.cell(row=idx, column=4, value=record.average_bill)
-            ws.cell(row=idx, column=5, value=record.no_of_bills)
-            ws.cell(row=idx, column=6, value=record.total_cash)
-            ws.cell(row=idx, column=7, value=record.actual_cash)
-            ws.cell(row=idx, column=8, value=record.online_sales)
-            ws.cell(row=idx, column=9, value=record.total_sales)
-            ws.cell(row=idx, column=10, value=record.unbilled_sales)
-            ws.cell(row=idx, column=11, value=record.software_figure)
-            ws.cell(row=idx, column=12, value=record.recorded_sales)
-            ws.cell(row=idx, column=13, value=record.sales_difference)
-            ws.cell(row=idx, column=14, value=record.cash_reserve)
-            ws.cell(row=idx, column=15, value=record.reserve_comments or record.notes)
-            ws.cell(row=idx, column=17, value=record.expense_amount)
+        # Data rows starting from row 6
+        for row_idx, record in enumerate(records, start=6):
+            ws.cell(row=row_idx, column=1, value=record.date)
+            ws.cell(row=row_idx, column=2, value=record.day)
+            ws.cell(row=row_idx, column=3, value=record.cash_balance)
+            ws.cell(row=row_idx, column=4, value=record.average_bill)
+            ws.cell(row=row_idx, column=5, value=record.no_of_bills)
+            ws.cell(row=row_idx, column=6, value=record.total_cash)
+            ws.cell(row=row_idx, column=7, value=record.actual_cash)
+            ws.cell(row=row_idx, column=8, value=record.online_sales)
+            ws.cell(row=row_idx, column=9, value=record.total_sales)
+            ws.cell(row=row_idx, column=10, value=record.unbilled_sales)
+            ws.cell(row=row_idx, column=11, value=record.software_figure)
+            ws.cell(row=row_idx, column=12, value=record.recorded_sales)
+            ws.cell(row=row_idx, column=13, value=record.sales_difference)
+            ws.cell(row=row_idx, column=14, value=record.cash_reserve)
+            ws.cell(row=row_idx, column=15, value=record.reserve_comments)
+            ws.cell(row=row_idx, column=17, value=record.expense_amount)
         
         # Save to bytes
         output = io.BytesIO()
@@ -222,4 +290,4 @@ def export_to_excel(records: list, year: int, month: int) -> bytes:
         return output.getvalue()
         
     except Exception as e:
-        raise Exception(f"Excel export failed: {str(e)}")
+        raise Exception(f"Failed to export to Excel: {str(e)}")

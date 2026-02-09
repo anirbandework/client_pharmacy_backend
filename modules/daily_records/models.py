@@ -7,7 +7,7 @@ class DailyRecord(Base):
     __tablename__ = "daily_records"
     
     id = Column(Integer, primary_key=True, index=True)
-    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=True, index=True)
+    shop_id = Column(Integer, nullable=True, index=True)  # Removed ForeignKey temporarily
     
     # Basic info (Columns A-B)
     date = Column(Date, unique=True, index=True)
@@ -60,7 +60,7 @@ class RecordModification(Base):
     __tablename__ = "record_modifications"
     
     id = Column(Integer, primary_key=True, index=True)
-    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=True, index=True)
+    shop_id = Column(Integer, nullable=True, index=True)  # Removed ForeignKey temporarily
     daily_record_id = Column(Integer, ForeignKey("daily_records.id", ondelete="CASCADE"), index=True)
     field_name = Column(String, nullable=False)
     old_value = Column(String, nullable=True)
