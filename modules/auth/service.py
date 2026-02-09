@@ -91,9 +91,10 @@ class AuthService:
     
     # Shop Management
     @staticmethod
-    def create_shop(db: Session, admin_id: int, shop_data: schemas.ShopCreate) -> models.Shop:
+    def create_shop(db: Session, admin_id: int, shop_data: schemas.ShopCreate, admin_name: str) -> models.Shop:
         db_shop = models.Shop(
             admin_id=admin_id,
+            created_by_admin=admin_name,
             **shop_data.model_dump()
         )
         db.add(db_shop)
@@ -102,20 +103,31 @@ class AuthService:
         return db_shop
     
     @staticmethod
+    def get_all_shops(db: Session):
+        """Get all shops from all admins"""
+        return db.query(models.Shop).all()
+    
+    @staticmethod
     def get_admin_shops(db: Session, admin_id: int):
         return db.query(models.Shop).filter(models.Shop.admin_id == admin_id).all()
     
     # Staff Management
     @staticmethod
-    def create_staff(db: Session, shop_id: int, staff_data: schemas.StaffCreate) -> models.Staff:
+    def create_staff(db: Session, shop_id: int, staff_data: schemas.StaffCreate, admin_name: str) -> models.Staff:
         db_staff = models.Staff(
             shop_id=shop_id,
+            created_by_admin=admin_name,
             **staff_data.model_dump()
         )
         db.add(db_staff)
         db.commit()
         db.refresh(db_staff)
         return db_staff
+    
+    @staticmethod
+    def get_all_staff(db: Session):
+        """Get all staff from all shops"""
+        return db.query(models.Staff).all()
     
     @staticmethod
     def get_shop_staff(db: Session, shop_id: int):

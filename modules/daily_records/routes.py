@@ -8,21 +8,58 @@ from typing import Optional, List
 from . import schemas, models, service
 from .ai_analytics import DailyRecordsAIAnalytics
 from app.core.config import settings
+from modules.auth.dependencies import get_current_admin, get_current_staff, get_current_user
 import io
 import os
+
+def get_shop_context(current_user = Depends(get_current_user)):
+    """Get shop context from current user"""
+    token_data = current_user["token_data"]
+    user = current_user["user"]
+    
+    if token_data.user_type == "staff":
+        return user.shop_id
+    elif token_data.user_type == "admin":
+        return None  # Admin can access all shops
+    else:
+        raise HTTPException(status_code=403, detail="Invalid user type")
 
 router = APIRouter()
 
 # CREATE
 @router.post("/", response_model=schemas.DailyRecord)
-def create_daily_record(record: schemas.DailyRecordCreate, db: Session = Depends(get_db)):
+def create_daily_record(
+    record: schemas.DailyRecordCreate, 
+    shop_id: Optional[int] = Query(None, description="Shop ID for admin users"),
+    current_user = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """Create a new daily record with automatic calculations"""
-    # Check if record already exists for this date
-    existing = db.query(models.DailyRecord).filter(models.DailyRecord.date == record.date).first()
+    token_data = current_user["token_data"]
+    user = current_user["user"]
+    
+    # Determine which shop to use
+    if token_data.user_type == "staff":
+        target_shop_id = user.shop_id
+    elif token_data.user_type == "admin":
+        target_shop_id = shop_id
+        if not target_shop_id:
+            raise HTTPException(status_code=400, detail="Shop ID required for admin users")
+    else:
+        raise HTTPException(status_code=403, detail="Invalid user type")
+    
+    # Check if record already exists for this date and shop
+    existing = db.query(models.DailyRecord).filter(
+        and_(
+            models.DailyRecord.date == record.date,
+            models.DailyRecord.shop_id == target_shop_id
+        )
+    ).first()
     if existing:
-        raise HTTPException(status_code=400, detail=f"Record already exists for {record.date}")
+        raise HTTPException(status_code=400, detail=f"Record already exists for {record.date} in this shop")
     
     record_dict = record.model_dump()
+    record_dict['shop_id'] = target_shop_id
     calculated = service.calculate_fields(record_dict)
     record_dict.update(calculated)
     
@@ -43,20 +80,64 @@ def create_daily_record(record: schemas.DailyRecordCreate, db: Session = Depends
 
 # READ - Single
 @router.get("/{record_id}", response_model=schemas.DailyRecord)
-def get_daily_record(record_id: int, db: Session = Depends(get_db)):
+def get_daily_record(
+    record_id: int, 
+    shop_id: Optional[int] = Query(None, description="Shop ID for admin users"),
+    current_user = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """Get a specific daily record by ID"""
-    record = db.query(models.DailyRecord).filter(models.DailyRecord.id == record_id).first()
+    token_data = current_user["token_data"]
+    user = current_user["user"]
+    
+    if token_data.user_type == "staff":
+        target_shop_id = user.shop_id
+    elif token_data.user_type == "admin":
+        target_shop_id = shop_id
+        if not target_shop_id:
+            raise HTTPException(status_code=400, detail="Shop ID required for admin users")
+    else:
+        raise HTTPException(status_code=403, detail="Invalid user type")
+    
+    record = db.query(models.DailyRecord).filter(
+        and_(
+            models.DailyRecord.id == record_id,
+            models.DailyRecord.shop_id == target_shop_id
+        )
+    ).first()
     if not record:
         raise HTTPException(status_code=404, detail="Record not found")
     return record
 
 # READ - By Date
 @router.get("/date/{record_date}", response_model=schemas.DailyRecord)
-def get_record_by_date(record_date: date, db: Session = Depends(get_db)):
+def get_record_by_date(
+    record_date: date, 
+    shop_id: Optional[int] = Query(None, description="Shop ID for admin users"),
+    current_user = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """Get daily record by specific date"""
-    record = db.query(models.DailyRecord).filter(models.DailyRecord.date == record_date).first()
+    token_data = current_user["token_data"]
+    user = current_user["user"]
+    
+    if token_data.user_type == "staff":
+        target_shop_id = user.shop_id
+    elif token_data.user_type == "admin":
+        target_shop_id = shop_id
+        if not target_shop_id:
+            raise HTTPException(status_code=400, detail="Shop ID required for admin users")
+    else:
+        raise HTTPException(status_code=403, detail="Invalid user type")
+    
+    record = db.query(models.DailyRecord).filter(
+        and_(
+            models.DailyRecord.date == record_date,
+            models.DailyRecord.shop_id == target_shop_id
+        )
+    ).first()
     if not record:
-        raise HTTPException(status_code=404, detail=f"No record found for {record_date}")
+        raise HTTPException(status_code=404, detail=f"No record found for {record_date} in this shop")
     return record
 
 # READ - List with filters
@@ -66,10 +147,24 @@ def get_daily_records(
     limit: int = 100,
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
+    shop_id: Optional[int] = Query(None, description="Shop ID for admin users"),
+    current_user = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """Get all daily records with optional date range filtering"""
-    query = db.query(models.DailyRecord)
+    token_data = current_user["token_data"]
+    user = current_user["user"]
+    
+    if token_data.user_type == "staff":
+        target_shop_id = user.shop_id
+    elif token_data.user_type == "admin":
+        target_shop_id = shop_id
+        if not target_shop_id:
+            raise HTTPException(status_code=400, detail="Shop ID required for admin users")
+    else:
+        raise HTTPException(status_code=403, detail="Invalid user type")
+    
+    query = db.query(models.DailyRecord).filter(models.DailyRecord.shop_id == target_shop_id)
     
     if start_date:
         query = query.filter(models.DailyRecord.date >= start_date)
@@ -157,10 +252,29 @@ def get_record_modifications(record_id: int, db: Session = Depends(get_db)):
 
 # MONTHLY ANALYTICS
 @router.get("/analytics/monthly/{year}/{month}")
-def get_monthly_analytics(year: int, month: int, db: Session = Depends(get_db)):
+def get_monthly_analytics(
+    year: int, 
+    month: int, 
+    shop_id: Optional[int] = Query(None, description="Shop ID for admin users"),
+    current_user = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """Get comprehensive monthly analytics"""
+    token_data = current_user["token_data"]
+    user = current_user["user"]
+    
+    if token_data.user_type == "staff":
+        target_shop_id = user.shop_id
+    elif token_data.user_type == "admin":
+        target_shop_id = shop_id
+        if not target_shop_id:
+            raise HTTPException(status_code=400, detail="Shop ID required for admin users")
+    else:
+        raise HTTPException(status_code=403, detail="Invalid user type")
+    
     records = db.query(models.DailyRecord).filter(
         and_(
+            models.DailyRecord.shop_id == target_shop_id,
             extract('year', models.DailyRecord.date) == year,
             extract('month', models.DailyRecord.date) == month
         )
@@ -208,10 +322,24 @@ def get_variance_report(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     threshold: float = 50.0,
+    shop_id: Optional[int] = Query(None, description="Shop ID for admin users"),
+    current_user = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """Get records with cash variances exceeding threshold"""
-    query = db.query(models.DailyRecord)
+    token_data = current_user["token_data"]
+    user = current_user["user"]
+    
+    if token_data.user_type == "staff":
+        target_shop_id = user.shop_id
+    elif token_data.user_type == "admin":
+        target_shop_id = shop_id
+        if not target_shop_id:
+            raise HTTPException(status_code=400, detail="Shop ID required for admin users")
+    else:
+        raise HTTPException(status_code=403, detail="Invalid user type")
+    
+    query = db.query(models.DailyRecord).filter(models.DailyRecord.shop_id == target_shop_id)
     
     if start_date:
         query = query.filter(models.DailyRecord.date >= start_date)
@@ -255,10 +383,29 @@ async def import_excel(
 
 # EXCEL EXPORT
 @router.get("/export/excel/{year}/{month}")
-def export_to_excel(year: int, month: int, db: Session = Depends(get_db)):
+def export_to_excel(
+    year: int, 
+    month: int, 
+    shop_id: Optional[int] = Query(None, description="Shop ID for admin users"),
+    current_user = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """Export monthly records to Excel in GMTR0003 format"""
+    token_data = current_user["token_data"]
+    user = current_user["user"]
+    
+    if token_data.user_type == "staff":
+        target_shop_id = user.shop_id
+    elif token_data.user_type == "admin":
+        target_shop_id = shop_id
+        if not target_shop_id:
+            raise HTTPException(status_code=400, detail="Shop ID required for admin users")
+    else:
+        raise HTTPException(status_code=403, detail="Invalid user type")
+    
     records = db.query(models.DailyRecord).filter(
         and_(
+            models.DailyRecord.shop_id == target_shop_id,
             extract('year', models.DailyRecord.date) == year,
             extract('month', models.DailyRecord.date) == month
         )
@@ -305,20 +452,50 @@ def bulk_create_records(
 
 # DASHBOARD SUMMARY
 @router.get("/analytics/dashboard")
-def get_dashboard_summary(db: Session = Depends(get_db)):
-    """Get dashboard summary for last 7 days"""
+def get_dashboard_summary(
+    shop_id: Optional[int] = Query(None, description="Shop ID for admin users"),
+    current_user = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get dashboard summary for last 7 days (shop-specific)"""
+    
+    token_data = current_user["token_data"]
+    user = current_user["user"]
+    
+    # Determine which shop to query
+    if token_data.user_type == "staff":
+        target_shop_id = user.shop_id
+    elif token_data.user_type == "admin":
+        target_shop_id = shop_id
+        if not target_shop_id:
+            raise HTTPException(status_code=400, detail="Shop ID required for admin users")
+    else:
+        raise HTTPException(status_code=403, detail="Invalid user type")
+    
     end_date = date.today()
     start_date = end_date - timedelta(days=7)
     
     records = db.query(models.DailyRecord).filter(
         and_(
+            models.DailyRecord.shop_id == target_shop_id,
             models.DailyRecord.date >= start_date,
             models.DailyRecord.date <= end_date
         )
     ).order_by(models.DailyRecord.date.desc()).all()
     
     if not records:
-        return {"message": "No recent records found"}
+        return {
+            "message": "No recent records found for this shop",
+            "shop_id": target_shop_id,
+            "latest_record": {"date": None, "total_sales": 0, "difference": 0},
+            "last_7_days": {
+                "total_sales": 0,
+                "average_daily_sales": 0,
+                "days_with_variance": 0,
+                "total_records": 0
+            },
+            "recent_records": []
+        }
     
     latest = records[0] if records else None
     total_sales_week = sum(r.total_sales or 0 for r in records)
@@ -326,6 +503,7 @@ def get_dashboard_summary(db: Session = Depends(get_db)):
     variances = [r for r in records if r.sales_difference and abs(r.sales_difference) > 50]
     
     return {
+        "shop_id": target_shop_id,
         "latest_record": {
             "date": latest.date if latest else None,
             "total_sales": latest.total_sales if latest else 0,

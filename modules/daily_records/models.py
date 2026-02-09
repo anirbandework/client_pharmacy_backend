@@ -7,10 +7,10 @@ class DailyRecord(Base):
     __tablename__ = "daily_records"
     
     id = Column(Integer, primary_key=True, index=True)
-    shop_id = Column(Integer, nullable=True, index=True)  # Removed ForeignKey temporarily
+    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False, index=True)
     
     # Basic info (Columns A-B)
-    date = Column(Date, unique=True, index=True)
+    date = Column(Date, index=True)
     day = Column(String)
     
     # Cash management (Column C)
@@ -55,12 +55,17 @@ class DailyRecord(Base):
     modified_by = Column(String, nullable=True)
     
     modifications = relationship("RecordModification", back_populates="daily_record", cascade="all, delete-orphan")
+    
+    # Unique constraint per shop per date
+    __table_args__ = (
+        {'sqlite_autoincrement': True},
+    )
 
 class RecordModification(Base):
     __tablename__ = "record_modifications"
     
     id = Column(Integer, primary_key=True, index=True)
-    shop_id = Column(Integer, nullable=True, index=True)  # Removed ForeignKey temporarily
+    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False, index=True)
     daily_record_id = Column(Integer, ForeignKey("daily_records.id", ondelete="CASCADE"), index=True)
     field_name = Column(String, nullable=False)
     old_value = Column(String, nullable=True)

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, Float, Date
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.database.database import Base
@@ -33,6 +33,11 @@ class Shop(Base):
     license_number = Column(String, nullable=True)
     gst_number = Column(String, nullable=True)
     
+    # Audit fields
+    created_by_admin = Column(String, nullable=False)  # Admin name who created
+    updated_by_admin = Column(String, nullable=True)   # Admin name who last updated
+    updated_at = Column(DateTime, nullable=True)
+    
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     
@@ -46,11 +51,17 @@ class Staff(Base):
     shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False)
     
     uuid = Column(String, unique=True, index=True, nullable=False, default=lambda: str(uuid.uuid4()))
-    full_name = Column(String, nullable=False)
+    name = Column(String, nullable=False)  # Changed from full_name to name
+    staff_code = Column(String, unique=True, index=True, nullable=False)  # Added staff_code
     phone = Column(String, nullable=True)
     email = Column(String, nullable=True)
     
     role = Column(String, default="staff")  # staff, shop_manager
+    
+    # Salary information
+    monthly_salary = Column(Float, nullable=True)
+    joining_date = Column(Date, nullable=True)
+    salary_eligibility_days = Column(Integer, default=30)  # Days after joining to be eligible for salary
     
     # Permissions
     can_manage_staff = Column(Boolean, default=False)
@@ -58,8 +69,15 @@ class Staff(Base):
     can_manage_inventory = Column(Boolean, default=True)
     can_manage_customers = Column(Boolean, default=True)
     
+    # Audit fields
+    created_by_admin = Column(String, nullable=False)  # Admin name who created
+    updated_by_admin = Column(String, nullable=True)   # Admin name who last updated
+    updated_at = Column(DateTime, nullable=True)
+    
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     last_login = Column(DateTime, nullable=True)
     
     shop = relationship("Shop", back_populates="staff")
+    salary_records = relationship("SalaryRecord", back_populates="staff")
+    payment_info = relationship("StaffPaymentInfo", back_populates="staff", uselist=False)

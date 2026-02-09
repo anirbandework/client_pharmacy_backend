@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.database.database import get_db
 from typing import List
+from datetime import datetime
 from . import schemas, models
 from .service import AuthService
 from .dependencies import get_current_admin, get_current_staff, require_permission
@@ -59,7 +60,7 @@ def create_shop(
     if existing:
         raise HTTPException(status_code=400, detail="Shop code already exists")
     
-    shop = AuthService.create_shop(db, admin.id, shop_data)
+    shop = AuthService.create_shop(db, admin.id, shop_data, admin.full_name)
     return shop
 
 @router.get("/admin/shops", response_model=List[schemas.Shop])
@@ -67,8 +68,16 @@ def get_admin_shops(
     admin: models.Admin = Depends(get_current_admin),
     db: Session = Depends(get_db)
 ):
-    """Get all shops owned by admin"""
-    return AuthService.get_admin_shops(db, admin.id)
+    """Get all shops (shared visibility)"""
+    return AuthService.get_all_shops(db)
+
+@router.get("/admin/all-shops", response_model=List[schemas.Shop])
+def get_all_shops(
+    admin: models.Admin = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """Get all shops from all admins"""
+    return AuthService.get_all_shops(db)
 
 @router.get("/admin/shops/{shop_id}", response_model=schemas.Shop)
 def get_shop(
@@ -92,16 +101,16 @@ def update_shop(
     admin: models.Admin = Depends(get_current_admin),
     db: Session = Depends(get_db)
 ):
-    """Update shop details"""
-    shop = db.query(models.Shop).filter(
-        models.Shop.id == shop_id,
-        models.Shop.admin_id == admin.id
-    ).first()
+    """Update shop details (any admin can update any shop)"""
+    shop = db.query(models.Shop).filter(models.Shop.id == shop_id).first()
     if not shop:
         raise HTTPException(status_code=404, detail="Shop not found")
     
     for key, value in shop_data.model_dump(exclude_unset=True).items():
         setattr(shop, key, value)
+    
+    shop.updated_by_admin = admin.full_name
+    shop.updated_at = datetime.utcnow()
     
     db.commit()
     db.refresh(shop)
@@ -113,22 +122,23 @@ def delete_shop(
     admin: models.Admin = Depends(get_current_admin),
     db: Session = Depends(get_db)
 ):
-    """Delete shop"""
-    shop = db.query(models.Shop).filter(
-        models.Shop.id == shop_id,
-        models.Shop.admin_id == admin.id
-    ).first()
+    """Delete shop and all its staff"""
+    shop = db.query(models.Shop).filter(models.Shop.id == shop_id).first()
     if not shop:
         raise HTTPException(status_code=404, detail="Shop not found")
     
-    # Check if shop has staff
-    staff_count = db.query(models.Staff).filter(models.Staff.shop_id == shop_id).count()
-    if staff_count > 0:
-        raise HTTPException(status_code=400, detail=f"Cannot delete shop with {staff_count} staff members")
+    # Delete all staff in the shop first
+    staff_list = db.query(models.Staff).filter(models.Staff.shop_id == shop_id).all()
+    staff_count = len(staff_list)
     
+    for staff in staff_list:
+        db.delete(staff)
+    
+    # Delete the shop
     db.delete(shop)
     db.commit()
-    return {"message": "Shop deleted successfully"}
+    
+    return {"message": f"Shop and {staff_count} staff members deleted successfully"}
 
 # STAFF MANAGEMENT
 
@@ -139,16 +149,21 @@ def create_staff(
     admin: models.Admin = Depends(get_current_admin),
     db: Session = Depends(get_db)
 ):
-    """Create staff for a shop (Admin only)"""
-    shop = db.query(models.Shop).filter(
-        models.Shop.id == shop_id,
-        models.Shop.admin_id == admin.id
-    ).first()
+    """Create staff for any shop (any admin can create staff)"""
+    shop = db.query(models.Shop).filter(models.Shop.id == shop_id).first()
     if not shop:
         raise HTTPException(status_code=404, detail="Shop not found")
     
-    staff = AuthService.create_staff(db, shop_id, staff_data)
+    staff = AuthService.create_staff(db, shop_id, staff_data, admin.full_name)
     return staff
+
+@router.get("/admin/all-staff", response_model=List[schemas.Staff])
+def get_all_staff(
+    admin: models.Admin = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """Get all staff from all shops"""
+    return AuthService.get_all_staff(db)
 
 @router.get("/shops/{shop_id}/staff", response_model=List[schemas.Staff])
 def get_shop_staff(
@@ -157,10 +172,7 @@ def get_shop_staff(
     admin: models.Admin = Depends(get_current_admin)
 ):
     """Get all staff for a shop"""
-    shop = db.query(models.Shop).filter(
-        models.Shop.id == shop_id,
-        models.Shop.admin_id == admin.id
-    ).first()
+    shop = db.query(models.Shop).filter(models.Shop.id == shop_id).first()
     if not shop:
         raise HTTPException(status_code=404, detail="Shop not found")
     
@@ -173,16 +185,16 @@ def update_staff(
     admin: models.Admin = Depends(get_current_admin),
     db: Session = Depends(get_db)
 ):
-    """Update staff details"""
-    staff = db.query(models.Staff).join(models.Shop).filter(
-        models.Staff.id == staff_id,
-        models.Shop.admin_id == admin.id
-    ).first()
+    """Update staff details (any admin can update any staff)"""
+    staff = db.query(models.Staff).filter(models.Staff.id == staff_id).first()
     if not staff:
         raise HTTPException(status_code=404, detail="Staff not found")
     
     for key, value in staff_data.model_dump(exclude_unset=True).items():
         setattr(staff, key, value)
+    
+    staff.updated_by_admin = admin.full_name
+    staff.updated_at = datetime.utcnow()
     
     db.commit()
     db.refresh(staff)
@@ -194,11 +206,8 @@ def delete_staff(
     admin: models.Admin = Depends(get_current_admin),
     db: Session = Depends(get_db)
 ):
-    """Delete staff"""
-    staff = db.query(models.Staff).join(models.Shop).filter(
-        models.Staff.id == staff_id,
-        models.Shop.admin_id == admin.id
-    ).first()
+    """Delete staff (any admin can delete any staff)"""
+    staff = db.query(models.Staff).filter(models.Staff.id == staff_id).first()
     if not staff:
         raise HTTPException(status_code=404, detail="Staff not found")
     

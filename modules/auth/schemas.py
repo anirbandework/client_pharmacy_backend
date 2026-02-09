@@ -1,6 +1,6 @@
 from pydantic import BaseModel, EmailStr, field_validator
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, date
 
 # Admin Schemas
 class AdminCreate(BaseModel):
@@ -62,6 +62,9 @@ class Shop(BaseModel):
     email: Optional[str]
     license_number: Optional[str]
     gst_number: Optional[str]
+    created_by_admin: str
+    updated_by_admin: Optional[str]
+    updated_at: Optional[datetime]
     is_active: bool
     created_at: datetime
     
@@ -70,20 +73,27 @@ class Shop(BaseModel):
 
 # Staff Schemas
 class StaffCreate(BaseModel):
-    full_name: str
+    name: str  # Changed from full_name
+    staff_code: str  # Added staff_code
     phone: Optional[str] = None
     email: Optional[str] = None
     role: str = "staff"
+    monthly_salary: Optional[float] = None  # Added salary field
+    joining_date: Optional[date] = None  # Added joining date
+    salary_eligibility_days: int = 30  # Days after joining to be eligible for salary
     can_manage_staff: bool = False
     can_view_analytics: bool = True
     can_manage_inventory: bool = True
     can_manage_customers: bool = True
 
 class StaffUpdate(BaseModel):
-    full_name: Optional[str] = None
+    name: Optional[str] = None  # Changed from full_name
     phone: Optional[str] = None
     email: Optional[str] = None
     role: Optional[str] = None
+    monthly_salary: Optional[float] = None  # Added salary field
+    joining_date: Optional[date] = None  # Added joining date
+    salary_eligibility_days: Optional[int] = None  # Days after joining to be eligible for salary
     can_manage_staff: Optional[bool] = None
     can_view_analytics: Optional[bool] = None
     can_manage_inventory: Optional[bool] = None
@@ -94,14 +104,21 @@ class Staff(BaseModel):
     id: int
     shop_id: int
     uuid: str
-    full_name: str
+    name: str  # Changed from full_name
+    staff_code: str  # Added staff_code
     phone: Optional[str]
     email: Optional[str]
     role: str
+    monthly_salary: Optional[float]  # Added salary field
+    joining_date: Optional[date]  # Added joining date
+    salary_eligibility_days: int  # Days after joining to be eligible for salary
     can_manage_staff: bool
     can_view_analytics: bool
     can_manage_inventory: bool
     can_manage_customers: bool
+    created_by_admin: str
+    updated_by_admin: Optional[str]
+    updated_at: Optional[datetime]
     is_active: bool
     created_at: datetime
     last_login: Optional[datetime]
