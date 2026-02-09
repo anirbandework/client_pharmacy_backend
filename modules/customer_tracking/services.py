@@ -419,6 +419,373 @@ class ConversionTrackingService:
             'staff_performance': staff_performance
         }
 
+class CallScriptService:
+    
+    @staticmethod
+    def generate_call_script(db: Session, customer_id: int, call_type: str = "general") -> CallScript:
+        """Generate intelligent call script for customer"""
+        
+        customer = db.query(CustomerProfile).filter(CustomerProfile.id == customer_id).first()
+        if not customer:
+            return None
+        
+        # Get comprehensive customer data
+        active_conditions = db.query(CustomerMedicalCondition).filter(
+            CustomerMedicalCondition.customer_id == customer_id,
+            CustomerMedicalCondition.is_active == True
+        ).all()
+        
+        current_prescriptions = db.query(CustomerPrescription).filter(
+            CustomerPrescription.customer_id == customer_id,
+            CustomerPrescription.is_active == True
+        ).all()
+        
+        recent_purchases = db.query(CustomerPurchase).filter(
+            CustomerPurchase.customer_id == customer_id
+        ).order_by(CustomerPurchase.purchase_date.desc()).limit(5).all()
+        
+        pending_refills = db.query(RefillReminder).filter(
+            RefillReminder.customer_id == customer_id,
+            RefillReminder.notification_sent == False
+        ).all()
+        
+        # Generate customer summary
+        customer_summary = CallScriptService._generate_customer_summary(
+            customer, active_conditions, current_prescriptions, recent_purchases
+        )
+        
+        # Generate medical summary
+        medical_summary = CallScriptService._generate_medical_summary(
+            active_conditions, current_prescriptions
+        )
+        
+        # Generate purchase history summary
+        purchase_summary = CallScriptService._generate_purchase_summary(
+            recent_purchases, customer.total_visits, customer.total_purchases
+        )
+        
+        # Generate talking points
+        talking_points = CallScriptService._generate_talking_points(
+            customer, active_conditions, pending_refills, call_type
+        )
+        
+        # Generate medicines to discuss
+        medicines_to_discuss = CallScriptService._generate_medicines_discussion(
+            pending_refills, current_prescriptions
+        )
+        
+        # Generate follow-up reminders
+        follow_up_reminders = CallScriptService._generate_followup_reminders(
+            current_prescriptions, active_conditions
+        )
+        
+        # Determine priority
+        priority = CallScriptService._determine_priority(
+            active_conditions, pending_refills, customer.last_visit_date
+        )
+        
+        # Create call script
+        call_script = CallScript(
+            customer_id=customer_id,
+            call_type=call_type,
+            priority=priority,
+            customer_summary=customer_summary,
+            medical_summary=medical_summary,
+            purchase_history_summary=purchase_summary,
+            key_talking_points=talking_points,
+            medicines_to_discuss=medicines_to_discuss,
+            follow_up_reminders=follow_up_reminders,
+            expires_at=datetime.utcnow() + timedelta(hours=24)
+        )
+        
+        db.add(call_script)
+        db.commit()
+        db.refresh(call_script)
+        
+        return call_script
+    
+    @staticmethod
+    def _generate_customer_summary(customer, conditions, prescriptions, purchases):
+        """Generate concise customer summary for staff"""
+        
+        summary_parts = []
+        
+        # Basic info
+        basic_info = f"Customer: {customer.name or 'Name not provided'}"
+        if customer.age:
+            basic_info += f", Age: {customer.age}"
+        if customer.gender:
+            basic_info += f", {customer.gender}"
+        summary_parts.append(basic_info)
+        
+        # Visit history
+        if customer.total_visits > 1:
+            summary_parts.append(f"Repeat customer with {customer.total_visits} visits, total purchases: ₹{customer.total_purchases:.0f}")
+        else:
+            summary_parts.append("New customer - first time visitor")
+        
+        # Medical conditions count
+        if conditions:
+            chronic_count = len([c for c in conditions if c.condition_type == "chronic"])
+            if chronic_count > 0:
+                summary_parts.append(f"Has {chronic_count} chronic condition(s) requiring ongoing care")
+        
+        # Recent activity
+        if customer.last_visit_date:
+            days_since = (datetime.now() - customer.last_visit_date).days
+            if days_since <= 7:
+                summary_parts.append(f"Recent visit {days_since} days ago")
+            elif days_since <= 30:
+                summary_parts.append(f"Last visit {days_since} days ago")
+            else:
+                summary_parts.append(f"Haven't seen in {days_since} days - needs follow-up")
+        
+        return ". ".join(summary_parts) + "."
+    
+    @staticmethod
+    def _generate_medical_summary(conditions, prescriptions):
+        """Generate medical summary for staff reference"""
+        
+        if not conditions and not prescriptions:
+            return "No active medical conditions or prescriptions on record."
+        
+        summary_parts = []
+        
+        # Active conditions
+        if conditions:
+            chronic_conditions = [c.condition_name for c in conditions if c.condition_type == "chronic"]
+            acute_conditions = [c.condition_name for c in conditions if c.condition_type != "chronic"]
+            
+            if chronic_conditions:
+                summary_parts.append(f"Chronic conditions: {', '.join(chronic_conditions)}")
+            if acute_conditions:
+                summary_parts.append(f"Current conditions: {', '.join(acute_conditions)}")
+        
+        # Active prescriptions
+        if prescriptions:
+            active_medicines = []
+            for prescription in prescriptions:
+                medicines = db.query(PrescriptionMedicine).filter(
+                    PrescriptionMedicine.prescription_id == prescription.id
+                ).all()
+                for med in medicines:
+                    active_medicines.append(f"{med.medicine_name} ({med.frequency})")
+            
+            if active_medicines:
+                summary_parts.append(f"Current medications: {', '.join(active_medicines[:3])}")
+                if len(active_medicines) > 3:
+                    summary_parts.append(f"+ {len(active_medicines) - 3} more medications")
+        
+        return ". ".join(summary_parts) + "."
+    
+    @staticmethod
+    def _generate_purchase_summary(purchases, total_visits, total_amount):
+        """Generate purchase behavior summary"""
+        
+        if not purchases:
+            return "No recent purchase history available."
+        
+        summary_parts = []
+        
+        # Recent purchases
+        recent_medicines = [p.medicine_name for p in purchases[:3]]
+        summary_parts.append(f"Recent purchases: {', '.join(recent_medicines)}")
+        
+        # Purchase pattern
+        if total_visits > 1:
+            avg_purchase = total_amount / total_visits
+            summary_parts.append(f"Average purchase: ₹{avg_purchase:.0f}")
+        
+        # Generic preference
+        generic_purchases = [p for p in purchases if p.is_generic]
+        if generic_purchases:
+            generic_rate = len(generic_purchases) / len(purchases) * 100
+            summary_parts.append(f"Uses generic medicines {generic_rate:.0f}% of the time")
+        
+        return ". ".join(summary_parts) + "."
+    
+    @staticmethod
+    def _generate_talking_points(customer, conditions, pending_refills, call_type):
+        """Generate key talking points for the call"""
+        
+        points = []
+        
+        # Greeting and relationship building
+        if customer.total_visits > 1:
+            points.append(f"Greet as valued customer - mention their {customer.total_visits} visits")
+        else:
+            points.append("Warm greeting for new customer - build rapport")
+        
+        # Call purpose based on type
+        if call_type == "refill_reminder" and pending_refills:
+            points.append(f"Remind about {len(pending_refills)} medicine(s) due for refill")
+            points.append("Emphasize importance of continuous treatment")
+        elif call_type == "follow_up":
+            points.append("Check on their health progress and medication effectiveness")
+        else:
+            points.append("General wellness check and pharmacy service reminder")
+        
+        # Health-focused conversation
+        if conditions:
+            chronic_conditions = [c for c in conditions if c.condition_type == "chronic"]
+            if chronic_conditions:
+                points.append("Show concern for their chronic condition management")
+                points.append("Offer medication counseling and adherence support")
+        
+        # Value proposition
+        points.append("Mention competitive pricing and quality assurance")
+        if not customer.prefers_generic:
+            points.append("Educate about generic alternatives to save costs")
+        points.append("Offer home delivery service if needed")
+        
+        # Relationship building
+        points.append("Ask about their experience with our pharmacy")
+        points.append("Invite them to visit for any health consultations")
+        
+        return "\n• ".join(["Key talking points:"] + points)
+    
+    @staticmethod
+    def _generate_medicines_discussion(pending_refills, prescriptions):
+        """Generate specific medicines to discuss"""
+        
+        if not pending_refills and not prescriptions:
+            return "No specific medicines to discuss."
+        
+        discussion_points = []
+        
+        # Pending refills
+        if pending_refills:
+            discussion_points.append("Medicines due for refill:")
+            for refill in pending_refills:
+                discussion_points.append(f"• {refill.medicine_name} - due {refill.reminder_date}")
+        
+        # Active prescriptions needing attention
+        if prescriptions:
+            discussion_points.append("\nCurrent prescriptions to check:")
+            for prescription in prescriptions[:3]:  # Limit to 3 most recent
+                discussion_points.append(f"• {prescription.condition_name} treatment")
+                if prescription.next_followup_date:
+                    discussion_points.append(f"  Next follow-up: {prescription.next_followup_date}")
+        
+        return "\n".join(discussion_points)
+    
+    @staticmethod
+    def _generate_followup_reminders(prescriptions, conditions):
+        """Generate follow-up reminders for staff"""
+        
+        reminders = []
+        
+        # Prescription follow-ups
+        for prescription in prescriptions:
+            if prescription.next_followup_date:
+                days_until = (prescription.next_followup_date - date.today()).days
+                if days_until <= 7:
+                    reminders.append(f"Doctor follow-up for {prescription.condition_name} due in {days_until} days")
+        
+        # Condition monitoring
+        for condition in conditions:
+            if condition.requires_monitoring and condition.next_checkup_date:
+                days_until = (condition.next_checkup_date - date.today()).days
+                if days_until <= 14:
+                    reminders.append(f"Health checkup for {condition.condition_name} due in {days_until} days")
+        
+        # General reminders
+        reminders.append("Schedule next call in 2-3 weeks if no immediate needs")
+        reminders.append("Send WhatsApp with health tips and pharmacy updates")
+        
+        return "\n• ".join(["Follow-up reminders:"] + reminders) if reminders else "No specific follow-ups needed."
+    
+    @staticmethod
+    def _determine_priority(conditions, pending_refills, last_visit_date):
+        """Determine call priority based on customer data"""
+        
+        # High priority conditions
+        critical_conditions = ['diabetes', 'hypertension', 'heart', 'cardiac', 'blood pressure']
+        has_critical = any(
+            any(keyword in condition.condition_name.lower() for keyword in critical_conditions)
+            for condition in conditions
+        )
+        
+        if has_critical and pending_refills:
+            return "high"
+        
+        # Medium priority
+        if pending_refills or (last_visit_date and (datetime.now() - last_visit_date).days > 30):
+            return "medium"
+        
+        return "low"
+    
+    @staticmethod
+    def get_customer_call_details(db: Session, customer_id: int) -> Dict[str, Any]:
+        """Get comprehensive customer details for phone calls"""
+        
+        customer = db.query(CustomerProfile).filter(CustomerProfile.id == customer_id).first()
+        if not customer:
+            return None
+        
+        # Get all related data
+        active_conditions = db.query(CustomerMedicalCondition).filter(
+            CustomerMedicalCondition.customer_id == customer_id,
+            CustomerMedicalCondition.is_active == True
+        ).all()
+        
+        current_prescriptions = db.query(CustomerPrescription).filter(
+            CustomerPrescription.customer_id == customer_id,
+            CustomerPrescription.is_active == True
+        ).all()
+        
+        pending_refills = db.query(RefillReminder).filter(
+            RefillReminder.customer_id == customer_id,
+            RefillReminder.notification_sent == False
+        ).all()
+        
+        # Get upcoming follow-ups
+        upcoming_followups = []
+        for prescription in current_prescriptions:
+            if prescription.next_followup_date and prescription.next_followup_date >= date.today():
+                upcoming_followups.append({
+                    'type': 'doctor_visit',
+                    'condition': prescription.condition_name,
+                    'date': prescription.next_followup_date,
+                    'doctor': prescription.doctor_name
+                })
+        
+        for condition in active_conditions:
+            if condition.next_checkup_date and condition.next_checkup_date >= date.today():
+                upcoming_followups.append({
+                    'type': 'health_checkup',
+                    'condition': condition.condition_name,
+                    'date': condition.next_checkup_date,
+                    'notes': condition.condition_notes
+                })
+        
+        # Generate or get existing call script
+        existing_script = db.query(CallScript).filter(
+            CallScript.customer_id == customer_id,
+            CallScript.expires_at > datetime.utcnow()
+        ).first()
+        
+        if not existing_script:
+            call_type = "refill_reminder" if pending_refills else "follow_up"
+            existing_script = CallScriptService.generate_call_script(db, customer_id, call_type)
+        
+        return {
+            'customer_id': customer.id,
+            'name': customer.name,
+            'phone': customer.phone,
+            'age': customer.age,
+            'active_conditions': active_conditions,
+            'current_prescriptions': current_prescriptions,
+            'allergies': customer.allergies,
+            'total_visits': customer.total_visits,
+            'last_visit_date': customer.last_visit_date,
+            'total_purchases': customer.total_purchases,
+            'prefers_generic': customer.prefers_generic,
+            'pending_refills': pending_refills,
+            'upcoming_followups': upcoming_followups,
+            'suggested_script': existing_script
+        }
+
 class ReminderService:
     
     @staticmethod

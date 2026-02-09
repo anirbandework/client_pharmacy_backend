@@ -91,6 +91,8 @@ class CustomerProfileBase(BaseModel):
     age: Optional[int] = None
     gender: Optional[str] = None
     address: Optional[str] = None
+    primary_doctor: Optional[str] = None
+    doctor_phone: Optional[str] = None
 
 class CustomerProfileCreate(CustomerProfileBase):
     contact_record_id: Optional[int] = None
@@ -264,9 +266,145 @@ class DailyTaskList(BaseModel):
     pending_reminders: List[ContactReminder]
     total_tasks: int
 
+# Prescription Schemas
+class PrescriptionMedicineBase(BaseModel):
+    medicine_name: str
+    generic_name: Optional[str] = None
+    brand_name: Optional[str] = None
+    dosage: str
+    frequency: str
+    duration_days: int
+    total_quantity_prescribed: int
+    refill_allowed: bool = True
+    refills_remaining: int = 0
+    start_date: date
+    end_date: date
+
+class PrescriptionMedicineCreate(PrescriptionMedicineBase):
+    prescription_id: int
+
+class PrescriptionMedicine(PrescriptionMedicineBase):
+    id: int
+    purchased: bool = False
+    purchase_date: Optional[date] = None
+    
+    class Config:
+        from_attributes = True
+
+class CustomerPrescriptionBase(BaseModel):
+    prescription_date: date
+    doctor_name: str
+    doctor_phone: Optional[str] = None
+    clinic_name: Optional[str] = None
+    condition_name: str
+    condition_severity: Optional[str] = None
+    is_chronic: bool = False
+    next_followup_date: Optional[date] = None
+    followup_type: Optional[str] = None
+    prescription_notes: Optional[str] = None
+
+class CustomerPrescriptionCreate(CustomerPrescriptionBase):
+    customer_id: int
+    medicines: List[PrescriptionMedicineBase]
+
+class CustomerPrescription(CustomerPrescriptionBase):
+    id: int
+    customer_id: int
+    followup_completed: bool = False
+    is_active: bool = True
+    completion_date: Optional[date] = None
+    created_at: datetime
+    medicines: List[PrescriptionMedicine] = []
+    
+    class Config:
+        from_attributes = True
+
+# Medical Condition Schemas
+class CustomerMedicalConditionBase(BaseModel):
+    condition_name: str
+    condition_type: str  # chronic, acute, preventive
+    severity: Optional[str] = None
+    diagnosed_date: Optional[date] = None
+    primary_medicine: Optional[str] = None
+    treatment_duration: Optional[str] = None
+    requires_monitoring: bool = False
+    monitoring_frequency: Optional[str] = None
+    last_checkup_date: Optional[date] = None
+    next_checkup_date: Optional[date] = None
+    condition_notes: Optional[str] = None
+
+class CustomerMedicalConditionCreate(CustomerMedicalConditionBase):
+    customer_id: int
+
+class CustomerMedicalCondition(CustomerMedicalConditionBase):
+    id: int
+    customer_id: int
+    is_active: bool = True
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+# Call Script Schemas
+class CallScriptBase(BaseModel):
+    call_type: str  # refill_reminder, follow_up, new_prescription
+    priority: str = "medium"  # high, medium, low
+    customer_summary: str
+    medical_summary: Optional[str] = None
+    purchase_history_summary: Optional[str] = None
+    key_talking_points: Optional[str] = None
+    medicines_to_discuss: Optional[str] = None
+    follow_up_reminders: Optional[str] = None
+
+class CallScriptCreate(CallScriptBase):
+    customer_id: int
+
+class CallScript(CallScriptBase):
+    id: int
+    customer_id: int
+    script_used: bool = False
+    call_successful: bool = False
+    customer_response: Optional[str] = None
+    created_at: datetime
+    expires_at: Optional[datetime] = None
+    
+    class Config:
+        from_attributes = True
+
+# Enhanced Customer Details for Calls
+class CustomerCallDetails(BaseModel):
+    # Basic info
+    customer_id: int
+    name: Optional[str]
+    phone: str
+    age: Optional[int]
+    
+    # Medical summary
+    active_conditions: List[CustomerMedicalCondition]
+    current_prescriptions: List[CustomerPrescription]
+    allergies: Optional[str]
+    
+    # Purchase behavior
+    total_visits: int
+    last_visit_date: Optional[datetime]
+    total_purchases: float
+    prefers_generic: bool
+    
+    # Upcoming needs
+    pending_refills: List[RefillReminder]
+    upcoming_followups: List[dict]
+    
+    # Call script
+    suggested_script: Optional[CallScript]
+    
+    class Config:
+        from_attributes = True
+
 class CustomerAnalytics(BaseModel):
     total_customers: int
     by_category: dict
     conversion_metrics: dict
     top_medicines: List[dict]
     generic_adoption_rate: float
+    prescription_compliance_rate: float
+    chronic_condition_distribution: dict

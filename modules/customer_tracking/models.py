@@ -122,6 +122,8 @@ class CustomerProfile(Base):
     chronic_conditions = Column(Text, nullable=True)
     allergies = Column(Text, nullable=True)
     preferred_brands = Column(Text, nullable=True)
+    primary_doctor = Column(String, nullable=True)
+    doctor_phone = Column(String, nullable=True)
     
     # Behavioral tracking
     first_visit_date = Column(DateTime, default=datetime.utcnow)
@@ -140,6 +142,8 @@ class CustomerProfile(Base):
     contact_record = relationship("ContactRecord", back_populates="customer")
     visits = relationship("CustomerVisit", back_populates="customer")
     purchases = relationship("CustomerPurchase", back_populates="customer")
+    prescriptions = relationship("CustomerPrescription", back_populates="customer")
+    medical_conditions = relationship("CustomerMedicalCondition", back_populates="customer")
 
 class CustomerVisit(Base):
     __tablename__ = "customer_visits"
@@ -239,6 +243,136 @@ class StaffMember(Base):
     conversion_rate = Column(Float, default=0.0)
     
     created_at = Column(DateTime, default=datetime.utcnow)
+
+class CustomerPrescription(Base):
+    __tablename__ = "customer_prescriptions"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=True, index=True)
+    customer_id = Column(Integer, ForeignKey("customer_profiles.id"))
+    
+    # Prescription details
+    prescription_date = Column(Date, nullable=False)
+    doctor_name = Column(String, nullable=False)
+    doctor_phone = Column(String, nullable=True)
+    clinic_name = Column(String, nullable=True)
+    
+    # Medical condition for this prescription
+    condition_name = Column(String, nullable=False)
+    condition_severity = Column(String, nullable=True)  # mild, moderate, severe
+    is_chronic = Column(Boolean, default=False)
+    
+    # Follow-up tracking
+    next_followup_date = Column(Date, nullable=True)
+    followup_type = Column(String, nullable=True)  # doctor_visit, lab_test, medication_review
+    followup_completed = Column(Boolean, default=False)
+    
+    # Prescription status
+    is_active = Column(Boolean, default=True)
+    completion_date = Column(Date, nullable=True)
+    
+    # Notes
+    prescription_notes = Column(Text, nullable=True)
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    customer = relationship("CustomerProfile", back_populates="prescriptions")
+    medicines = relationship("PrescriptionMedicine", back_populates="prescription")
+
+class PrescriptionMedicine(Base):
+    __tablename__ = "prescription_medicines"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=True, index=True)
+    prescription_id = Column(Integer, ForeignKey("customer_prescriptions.id"))
+    
+    # Medicine details
+    medicine_name = Column(String, nullable=False)
+    generic_name = Column(String, nullable=True)
+    brand_name = Column(String, nullable=True)
+    dosage = Column(String, nullable=False)  # 500mg, 10ml, etc.
+    frequency = Column(String, nullable=False)  # twice daily, once daily, etc.
+    
+    # Duration and refill
+    duration_days = Column(Integer, nullable=False)
+    total_quantity_prescribed = Column(Integer, nullable=False)
+    refill_allowed = Column(Boolean, default=True)
+    refills_remaining = Column(Integer, default=0)
+    
+    # Timing
+    start_date = Column(Date, nullable=False)
+    end_date = Column(Date, nullable=False)
+    
+    # Purchase tracking
+    purchased = Column(Boolean, default=False)
+    purchase_date = Column(Date, nullable=True)
+    
+    # Relationships
+    prescription = relationship("CustomerPrescription", back_populates="medicines")
+
+class CustomerMedicalCondition(Base):
+    __tablename__ = "customer_medical_conditions"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=True, index=True)
+    customer_id = Column(Integer, ForeignKey("customer_profiles.id"))
+    
+    # Condition details
+    condition_name = Column(String, nullable=False)
+    condition_type = Column(String, nullable=False)  # chronic, acute, preventive
+    severity = Column(String, nullable=True)  # mild, moderate, severe
+    
+    # Timeline
+    diagnosed_date = Column(Date, nullable=True)
+    is_active = Column(Boolean, default=True)
+    
+    # Treatment details
+    primary_medicine = Column(String, nullable=True)
+    treatment_duration = Column(String, nullable=True)  # ongoing, 30 days, etc.
+    
+    # Monitoring
+    requires_monitoring = Column(Boolean, default=False)
+    monitoring_frequency = Column(String, nullable=True)  # weekly, monthly, etc.
+    last_checkup_date = Column(Date, nullable=True)
+    next_checkup_date = Column(Date, nullable=True)
+    
+    # Notes
+    condition_notes = Column(Text, nullable=True)
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    customer = relationship("CustomerProfile", back_populates="medical_conditions")
+
+class CallScript(Base):
+    __tablename__ = "call_scripts"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=True, index=True)
+    customer_id = Column(Integer, ForeignKey("customer_profiles.id"))
+    
+    # Call context
+    call_type = Column(String, nullable=False)  # refill_reminder, follow_up, new_prescription
+    priority = Column(String, default="medium")  # high, medium, low
+    
+    # Customer summary for staff
+    customer_summary = Column(Text, nullable=False)
+    medical_summary = Column(Text, nullable=True)
+    purchase_history_summary = Column(Text, nullable=True)
+    
+    # Talking points
+    key_talking_points = Column(Text, nullable=True)
+    medicines_to_discuss = Column(Text, nullable=True)
+    follow_up_reminders = Column(Text, nullable=True)
+    
+    # Call outcome tracking
+    script_used = Column(Boolean, default=False)
+    call_successful = Column(Boolean, default=False)
+    customer_response = Column(Text, nullable=True)
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=True)
 
 class ContactUpload(Base):
     __tablename__ = "contact_uploads"

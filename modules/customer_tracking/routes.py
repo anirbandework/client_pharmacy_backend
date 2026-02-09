@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_, extract
+from sqlalchemy import func, and_, extract, Integer
 from app.database.database import get_db
 from datetime import datetime, timedelta, date
 from typing import Optional, List
@@ -538,6 +538,279 @@ def get_daily_summary(
         'conversions': conversions_today,
         'customer_visits': visits_today,
         'revenue': float(revenue_today)
+    }
+
+# PRESCRIPTION AND MEDICAL CONDITION MANAGEMENT
+
+@router.post("/customers/{customer_id}/prescriptions", response_model=schemas.CustomerPrescription)
+def add_customer_prescription(
+    customer_id: int,
+    prescription: schemas.CustomerPrescriptionCreate,
+    db: Session = Depends(get_db)
+):
+    """Add prescription details for customer"""
+    
+    customer = db.query(models.CustomerProfile).filter(
+        models.CustomerProfile.id == customer_id
+    ).first()
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    
+    # Create prescription
+    db_prescription = models.CustomerPrescription(
+        customer_id=customer_id,
+        prescription_date=prescription.prescription_date,
+        doctor_name=prescription.doctor_name,
+        doctor_phone=prescription.doctor_phone,
+        clinic_name=prescription.clinic_name,
+        condition_name=prescription.condition_name,
+        condition_severity=prescription.condition_severity,
+        is_chronic=prescription.is_chronic,
+        next_followup_date=prescription.next_followup_date,
+        followup_type=prescription.followup_type,
+        prescription_notes=prescription.prescription_notes
+    )
+    db.add(db_prescription)
+    db.flush()
+    
+    # Add medicines
+    for med_data in prescription.medicines:
+        db_medicine = models.PrescriptionMedicine(
+            prescription_id=db_prescription.id,
+            medicine_name=med_data.medicine_name,
+            generic_name=med_data.generic_name,
+            brand_name=med_data.brand_name,
+            dosage=med_data.dosage,
+            frequency=med_data.frequency,
+            duration_days=med_data.duration_days,
+            total_quantity_prescribed=med_data.total_quantity_prescribed,
+            refill_allowed=med_data.refill_allowed,
+            refills_remaining=med_data.refills_remaining,
+            start_date=med_data.start_date,
+            end_date=med_data.end_date
+        )
+        db.add(db_medicine)
+    
+    db.commit()
+    db.refresh(db_prescription)
+    return db_prescription
+
+@router.post("/customers/{customer_id}/medical-conditions", response_model=schemas.CustomerMedicalCondition)
+def add_medical_condition(
+    customer_id: int,
+    condition: schemas.CustomerMedicalConditionCreate,
+    db: Session = Depends(get_db)
+):
+    """Add medical condition for customer"""
+    
+    customer = db.query(models.CustomerProfile).filter(
+        models.CustomerProfile.id == customer_id
+    ).first()
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    
+    db_condition = models.CustomerMedicalCondition(**condition.model_dump())
+    db.add(db_condition)
+    db.commit()
+    db.refresh(db_condition)
+    return db_condition
+
+@router.get("/customers/{customer_id}/prescriptions", response_model=List[schemas.CustomerPrescription])
+def get_customer_prescriptions(
+    customer_id: int,
+    active_only: bool = True,
+    db: Session = Depends(get_db)
+):
+    """Get customer prescriptions"""
+    
+    query = db.query(models.CustomerPrescription).filter(
+        models.CustomerPrescription.customer_id == customer_id
+    )
+    
+    if active_only:
+        query = query.filter(models.CustomerPrescription.is_active == True)
+    
+    return query.all()
+
+@router.get("/customers/{customer_id}/medical-conditions", response_model=List[schemas.CustomerMedicalCondition])
+def get_customer_medical_conditions(
+    customer_id: int,
+    active_only: bool = True,
+    db: Session = Depends(get_db)
+):
+    """Get customer medical conditions"""
+    
+    query = db.query(models.CustomerMedicalCondition).filter(
+        models.CustomerMedicalCondition.customer_id == customer_id
+    )
+    
+    if active_only:
+        query = query.filter(models.CustomerMedicalCondition.is_active == True)
+    
+    return query.all()
+
+# CALL SCRIPT MANAGEMENT
+
+@router.get("/customers/{customer_id}/call-details", response_model=schemas.CustomerCallDetails)
+def get_customer_call_details(
+    customer_id: int,
+    db: Session = Depends(get_db)
+):
+    """Get comprehensive customer details for phone calls"""
+    
+    call_details = services.CallScriptService.get_customer_call_details(db, customer_id)
+    if not call_details:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    
+    return call_details
+
+@router.post("/customers/{customer_id}/call-script", response_model=schemas.CallScript)
+def generate_call_script(
+    customer_id: int,
+    call_type: str = "general",
+    db: Session = Depends(get_db)
+):
+    """Generate intelligent call script for customer"""
+    
+    call_script = services.CallScriptService.generate_call_script(db, customer_id, call_type)
+    if not call_script:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    
+    return call_script
+
+@router.put("/call-scripts/{script_id}/outcome")
+def update_call_outcome(
+    script_id: int,
+    call_successful: bool,
+    customer_response: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """Update call script with outcome"""
+    
+    script = db.query(models.CallScript).filter(models.CallScript.id == script_id).first()
+    if not script:
+        raise HTTPException(status_code=404, detail="Call script not found")
+    
+    script.script_used = True
+    script.call_successful = call_successful
+    script.customer_response = customer_response
+    
+    db.commit()
+    return {"message": "Call outcome updated successfully"}
+
+@router.get("/call-scripts/priority/{priority}")
+def get_call_scripts_by_priority(
+    priority: str,
+    limit: int = 50,
+    db: Session = Depends(get_db)
+):
+    """Get call scripts by priority for staff task management"""
+    
+    scripts = db.query(models.CallScript).filter(
+        models.CallScript.priority == priority,
+        models.CallScript.script_used == False,
+        models.CallScript.expires_at > datetime.utcnow()
+    ).limit(limit).all()
+    
+    return scripts
+
+# ENHANCED ANALYTICS
+
+@router.get("/analytics/prescription-compliance")
+def get_prescription_compliance_analytics(
+    days: int = 30,
+    db: Session = Depends(get_db)
+):
+    """Get prescription compliance and follow-up analytics"""
+    
+    start_date = datetime.now() - timedelta(days=days)
+    
+    # Total prescriptions
+    total_prescriptions = db.query(models.CustomerPrescription).filter(
+        models.CustomerPrescription.created_at >= start_date
+    ).count()
+    
+    # Completed follow-ups
+    completed_followups = db.query(models.CustomerPrescription).filter(
+        models.CustomerPrescription.created_at >= start_date,
+        models.CustomerPrescription.followup_completed == True
+    ).count()
+    
+    # Overdue follow-ups
+    overdue_followups = db.query(models.CustomerPrescription).filter(
+        models.CustomerPrescription.next_followup_date < date.today(),
+        models.CustomerPrescription.followup_completed == False,
+        models.CustomerPrescription.is_active == True
+    ).count()
+    
+    # Chronic condition distribution
+    chronic_conditions = db.query(
+        models.CustomerMedicalCondition.condition_name,
+        func.count(models.CustomerMedicalCondition.id).label('count')
+    ).filter(
+        models.CustomerMedicalCondition.is_active == True,
+        models.CustomerMedicalCondition.condition_type == 'chronic'
+    ).group_by(models.CustomerMedicalCondition.condition_name).all()
+    
+    compliance_rate = (completed_followups / total_prescriptions * 100) if total_prescriptions > 0 else 0
+    
+    return {
+        'total_prescriptions': total_prescriptions,
+        'completed_followups': completed_followups,
+        'overdue_followups': overdue_followups,
+        'compliance_rate': compliance_rate,
+        'chronic_condition_distribution': {condition: count for condition, count in chronic_conditions}
+    }
+
+@router.get("/analytics/call-effectiveness")
+def get_call_effectiveness_analytics(
+    days: int = 30,
+    db: Session = Depends(get_db)
+):
+    """Get call script effectiveness analytics"""
+    
+    start_date = datetime.now() - timedelta(days=days)
+    
+    # Call scripts generated
+    total_scripts = db.query(models.CallScript).filter(
+        models.CallScript.created_at >= start_date
+    ).count()
+    
+    # Scripts used
+    scripts_used = db.query(models.CallScript).filter(
+        models.CallScript.created_at >= start_date,
+        models.CallScript.script_used == True
+    ).count()
+    
+    # Successful calls
+    successful_calls = db.query(models.CallScript).filter(
+        models.CallScript.created_at >= start_date,
+        models.CallScript.call_successful == True
+    ).count()
+    
+    # Priority distribution
+    priority_stats = db.query(
+        models.CallScript.priority,
+        func.count(models.CallScript.id).label('count'),
+        func.avg(func.cast(models.CallScript.call_successful, Integer)).label('success_rate')
+    ).filter(
+        models.CallScript.created_at >= start_date,
+        models.CallScript.script_used == True
+    ).group_by(models.CallScript.priority).all()
+    
+    usage_rate = (scripts_used / total_scripts * 100) if total_scripts > 0 else 0
+    success_rate = (successful_calls / scripts_used * 100) if scripts_used > 0 else 0
+    
+    return {
+        'total_scripts_generated': total_scripts,
+        'scripts_used': scripts_used,
+        'successful_calls': successful_calls,
+        'usage_rate': usage_rate,
+        'success_rate': success_rate,
+        'priority_performance': {
+            priority: {'count': count, 'success_rate': float(success_rate or 0) * 100}
+            for priority, count, success_rate in priority_stats
+        }
     }
 
 # AI ANALYTICS
