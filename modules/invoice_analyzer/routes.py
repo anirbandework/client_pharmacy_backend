@@ -64,7 +64,17 @@ async def get_dashboard_summary(
         current_summary = MonthlyInvoiceSummary(
             year=current_date.year,
             month=current_date.month,
-            shop_id=shop_id
+            shop_id=shop_id,
+            total_invoices=0,
+            total_amount=0.0,
+            total_items=0,
+            green_invoices=0,
+            yellow_invoices=0,
+            red_invoices=0,
+            month_color="red",
+            overall_sold_percentage=0.0,
+            expiring_items_count=0,
+            expired_items_count=0
         )
     
     # Get pending alerts (limit to 10)
