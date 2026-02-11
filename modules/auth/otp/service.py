@@ -30,6 +30,12 @@ class OTPService:
         try:
             fast2sms_key = os.getenv('FAST2SMS_API_KEY')
             
+            # Debug: Check if API key is loaded
+            if fast2sms_key:
+                print(f"✓ Fast2SMS API key loaded (length: {len(fast2sms_key)})")
+            else:
+                print("✗ Fast2SMS API key NOT found in environment")
+            
             if fast2sms_key and fast2sms_key != 'your_fast2sms_api_key_here':
                 print(f"📤 Attempting to send SMS via Fast2SMS to {phone}...")
                 
