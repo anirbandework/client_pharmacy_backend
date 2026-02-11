@@ -121,7 +121,7 @@ class OTPService:
         db.commit()
         db.refresh(otp)
         
-        # Print OTP immediately for development
+        # Always print OTP in logs (for debugging in production too)
         print(f"\n{'='*50}")
         print(f"🔐 ADMIN OTP for {phone}: {otp_code}")
         print(f"Valid for {OTPService.OTP_EXPIRY_MINUTES} minutes")
@@ -196,7 +196,7 @@ class OTPService:
         db.commit()
         db.refresh(otp)
         
-        # Print OTP immediately for development
+        # Always print OTP in logs (for debugging in production too)
         print(f"\n{'='*50}")
         print(f"🔐 STAFF OTP for {phone}: {otp_code}")
         print(f"Valid for {OTPService.OTP_EXPIRY_MINUTES} minutes")
