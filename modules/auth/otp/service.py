@@ -46,7 +46,7 @@ class OTPService:
                     "authorization": fast2sms_key,
                     "route": "otp",
                     "variables_values": otp,
-                    "flash": "0",
+                    "flash": "1",
                     "numbers": clean_phone
                 }
                 
