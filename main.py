@@ -1,5 +1,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
+import os
+
+# Load environment variables
+load_dotenv()
+
 from modules.customer_tracking.routes import router as customer_router
 from modules.invoice_analyzer.routes import router as invoice_router
 from modules.stock_audit.routes import router as stock_router
@@ -15,6 +21,7 @@ from modules.daily_records.models import DailyRecord, RecordModification
 from modules.customer_tracking.models import *
 from modules.stock_audit.models import *
 from modules.auth.models import Admin, Shop, Staff
+from modules.auth.otp.models import OTPVerification
 from modules.auth.salary_management.models import SalaryRecord, StaffPaymentInfo, SalaryAlert
 from modules.auth.attendance.models import (
     ShopWiFi, StaffDevice, AttendanceRecord, 

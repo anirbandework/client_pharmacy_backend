@@ -57,10 +57,10 @@ class AuthService:
     def create_admin(db: Session, admin_data: schemas.AdminCreate) -> models.Admin:
         hashed_password = AuthService.hash_password(admin_data.password)
         db_admin = models.Admin(
+            phone=admin_data.phone,
             email=admin_data.email,
             password_hash=hashed_password,
-            full_name=admin_data.full_name,
-            phone=admin_data.phone
+            full_name=admin_data.full_name
         )
         db.add(db_admin)
         db.commit()

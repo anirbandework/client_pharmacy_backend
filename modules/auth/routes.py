@@ -6,17 +6,55 @@ from datetime import datetime
 from . import schemas, models
 from .service import AuthService
 from .dependencies import get_current_admin, get_current_staff, require_permission
+from .otp import OTPService, SendOTPRequest, VerifyOTPRequest, SendStaffOTPRequest, VerifyStaffOTPRequest, OTPResponse
 
 router = APIRouter()
 
-# ADMIN AUTHENTICATION
+# ADMIN AUTHENTICATION WITH OTP
+
+@router.post("/admin/send-otp", response_model=OTPResponse)
+async def send_admin_otp(request: SendOTPRequest, db: Session = Depends(get_db)):
+    """Send OTP to admin phone for login"""
+    try:
+        otp = OTPService.create_otp(db, request.phone, request.password)
+        return OTPResponse(
+            message="OTP sent successfully",
+            expires_in=300,  # 5 minutes
+            can_resend_in=30  # Can resend after 30 seconds
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/admin/verify-otp", response_model=schemas.Token)
+def verify_admin_otp(request: VerifyOTPRequest, db: Session = Depends(get_db)):
+    """Verify OTP and login admin"""
+    try:
+        admin = OTPService.verify_otp(db, request.phone, request.otp_code)
+        
+        token = AuthService.create_access_token({
+            "user_id": admin.id,
+            "user_type": "admin",
+            "email": admin.email
+        })
+        
+        return {
+            "access_token": token,
+            "token_type": "bearer",
+            "user_type": "admin",
+            "shop_id": None,
+            "shop_name": None
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+# ADMIN AUTHENTICATION (OLD - Keep for backward compatibility)
 
 @router.post("/admin/register", response_model=schemas.Admin)
 def register_admin(admin_data: schemas.AdminCreate, db: Session = Depends(get_db)):
     """Register new admin (business owner)"""
-    existing = db.query(models.Admin).filter(models.Admin.email == admin_data.email).first()
+    existing = db.query(models.Admin).filter(models.Admin.phone == admin_data.phone).first()
     if existing:
-        raise HTTPException(status_code=400, detail="Email already registered")
+        raise HTTPException(status_code=400, detail="Phone number already registered")
     
     admin = AuthService.create_admin(db, admin_data)
     return admin
@@ -217,9 +255,51 @@ def delete_staff(
 
 # STAFF AUTHENTICATION
 
+@router.post("/staff/send-otp", response_model=OTPResponse)
+async def send_staff_otp(request: SendStaffOTPRequest, db: Session = Depends(get_db)):
+    """Send OTP to staff phone for login"""
+    try:
+        otp = OTPService.create_staff_otp(db, request.uuid, request.phone)
+        return OTPResponse(
+            message="OTP sent successfully",
+            expires_in=300,  # 5 minutes
+            can_resend_in=30
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/staff/verify-otp", response_model=schemas.Token)
+def verify_staff_otp(request: VerifyStaffOTPRequest, db: Session = Depends(get_db)):
+    """Verify OTP and login staff"""
+    try:
+        staff = OTPService.verify_staff_otp(db, request.uuid, request.phone, request.otp_code)
+        
+        # Check if shop is active
+        if not staff.shop.is_active:
+            raise HTTPException(status_code=403, detail="Shop is inactive")
+        
+        token = AuthService.create_access_token({
+            "user_id": staff.id,
+            "user_type": "staff",
+            "shop_id": staff.shop_id,
+            "email": staff.email
+        })
+        
+        return {
+            "access_token": token,
+            "token_type": "bearer",
+            "user_type": "staff",
+            "shop_id": staff.shop_id,
+            "shop_name": staff.shop.shop_name
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+# STAFF AUTHENTICATION (OLD - UUID only)
+
 @router.post("/staff/login", response_model=schemas.Token)
 def staff_login(login_data: schemas.StaffLogin, db: Session = Depends(get_db)):
-    """Staff login using UUID"""
+    """Staff login using UUID only (legacy)"""
     staff = AuthService.authenticate_staff(db, login_data.uuid)
     if not staff:
         raise HTTPException(status_code=401, detail="Invalid UUID or staff inactive")

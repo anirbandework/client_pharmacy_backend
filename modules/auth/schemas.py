@@ -4,10 +4,10 @@ from datetime import datetime, date
 
 # Admin Schemas
 class AdminCreate(BaseModel):
-    email: EmailStr
+    phone: str
     password: str
     full_name: str
-    phone: Optional[str] = None
+    email: Optional[EmailStr] = None
     
     @field_validator('password')
     @classmethod
@@ -17,6 +17,24 @@ class AdminCreate(BaseModel):
         if len(v) < 6:
             raise ValueError('Password must be at least 6 characters')
         return v
+    
+    @field_validator('phone')
+    @classmethod
+    def validate_phone(cls, v):
+        import re
+        # Normalize phone number
+        phone = re.sub(r'[^\d+]', '', v)
+        phone = phone.replace('+', '')
+        
+        # Add country code if not present
+        if not phone.startswith('91') and len(phone) == 10:
+            phone = '91' + phone
+        
+        # Add + prefix and validate
+        phone = '+' + phone
+        if not re.match(r'^\+91\d{10}$', phone):
+            raise ValueError('Invalid Indian phone number')
+        return phone
 
 class AdminLogin(BaseModel):
     email: EmailStr
@@ -24,9 +42,9 @@ class AdminLogin(BaseModel):
 
 class Admin(BaseModel):
     id: int
-    email: str
+    email: Optional[str]
     full_name: str
-    phone: Optional[str]
+    phone: str
     is_active: bool
     created_at: datetime
     

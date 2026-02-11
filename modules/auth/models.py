@@ -8,10 +8,10 @@ class Admin(Base):
     __tablename__ = "admins"
     
     id = Column(Integer, primary_key=True, index=True)
-    email = Column(String, unique=True, index=True, nullable=False)
+    email = Column(String, unique=True, index=True, nullable=True)  # Optional now
     password_hash = Column(String, nullable=False)
     full_name = Column(String, nullable=False)
-    phone = Column(String, nullable=True)
+    phone = Column(String(15), unique=True, index=True, nullable=False)  # Required for OTP
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     
@@ -81,7 +81,7 @@ class Staff(Base):
     shop = relationship("Shop", back_populates="staff")
     salary_records = relationship("SalaryRecord", back_populates="staff")
     payment_info = relationship("StaffPaymentInfo", back_populates="staff", uselist=False)
-    # Attendance relationships
-    devices = relationship("StaffDevice", foreign_keys="[StaffDevice.staff_id]")
-    attendance_records = relationship("AttendanceRecord", foreign_keys="[AttendanceRecord.staff_id]")
-    leave_requests = relationship("LeaveRequest", foreign_keys="[LeaveRequest.staff_id]")
+    # Attendance relationships with cascade delete
+    devices = relationship("StaffDevice", foreign_keys="[StaffDevice.staff_id]", back_populates="staff", cascade="all, delete-orphan")
+    attendance_records = relationship("AttendanceRecord", foreign_keys="[AttendanceRecord.staff_id]", back_populates="staff", cascade="all, delete-orphan")
+    leave_requests = relationship("LeaveRequest", foreign_keys="[LeaveRequest.staff_id]", back_populates="staff", cascade="all, delete-orphan")
