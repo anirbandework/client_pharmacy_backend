@@ -81,3 +81,7 @@ class Staff(Base):
     shop = relationship("Shop", back_populates="staff")
     salary_records = relationship("SalaryRecord", back_populates="staff")
     payment_info = relationship("StaffPaymentInfo", back_populates="staff", uselist=False)
+    # Attendance relationships
+    devices = relationship("StaffDevice", foreign_keys="[StaffDevice.staff_id]")
+    attendance_records = relationship("AttendanceRecord", foreign_keys="[AttendanceRecord.staff_id]")
+    leave_requests = relationship("LeaveRequest", foreign_keys="[LeaveRequest.staff_id]")
