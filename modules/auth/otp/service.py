@@ -44,9 +44,8 @@ class OTPService:
                 url = "https://www.fast2sms.com/dev/bulkV2"
                 params = {
                     "authorization": fast2sms_key,
-                    "route": "q",
-                    "message": f"Your OTP code is {otp}. Valid for 5 minutes. Do not share this code.",
-                    "language": "english",
+                    "route": "otp",
+                    "variables_values": otp,
                     "flash": "0",
                     "numbers": clean_phone
                 }
