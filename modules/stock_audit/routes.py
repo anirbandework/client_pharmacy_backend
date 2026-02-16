@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from app.database.database import get_db
 from datetime import datetime, date, timedelta
@@ -7,6 +8,9 @@ from . import schemas, models, services
 from .ai_service import StockAuditAIService
 from modules.auth.dependencies import get_current_user as get_user_dict, get_current_admin
 from modules.auth.models import Staff, Admin
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment
+from io import BytesIO
 
 def get_current_user(user_dict: dict = Depends(get_user_dict)) -> Staff:
     """Extract staff user from auth dict"""
@@ -193,7 +197,19 @@ def get_stock_items(
     if batch_number:
         query = query.filter(models.StockItem.batch_number == batch_number)
     
-    return query.offset(skip).limit(limit).all()
+    items = query.offset(skip).limit(limit).all()
+    
+    # Add section and rack names
+    result = []
+    for item in items:
+        item_dict = {
+            **item.__dict__,
+            "section_name": item.section.section_name if item.section else None,
+            "rack_name": item.section.rack.rack_number if item.section and item.section.rack else None
+        }
+        result.append(item_dict)
+    
+    return result
 
 @router.get("/items/{item_id}", response_model=schemas.StockItem)
 def get_stock_item(
@@ -208,7 +224,14 @@ def get_stock_item(
     ).first()
     if not item:
         raise HTTPException(status_code=404, detail="Stock item not found")
-    return item
+    
+    # Add section and rack names
+    item_dict = {
+        **item.__dict__,
+        "section_name": item.section.section_name if item.section else None,
+        "rack_name": item.section.rack.rack_number if item.section and item.section.rack else None
+    }
+    return item_dict
 
 @router.put("/items/{item_id}", response_model=schemas.StockItem)
 def update_stock_item(
@@ -655,3 +678,199 @@ def get_ai_insights(
         return StockAuditAIService.get_ai_insights(db, current_user.shop_id, days)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# EXCEL EXPORT
+
+@router.get("/export/stock-items")
+def export_stock_items_excel(
+    db: Session = Depends(get_db),
+    current_user: Staff = Depends(get_current_user)
+):
+    """Export all stock items to Excel"""
+    items = db.query(models.StockItem).filter(models.StockItem.shop_id == current_user.shop_id).all()
+    
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Stock Items"
+    
+    # Header styling
+    header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF")
+    
+    # Headers
+    headers = ["ID", "Item Name", "Generic Name", "Brand Name", "Batch Number", "Rack", "Section", 
+               "Software Qty", "Physical Qty", "Discrepancy", "Unit Price", "Expiry Date", 
+               "Manufacturer", "Last Audit Date", "Created At"]
+    
+    for col, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=header)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+    
+    # Data rows
+    for row, item in enumerate(items, 2):
+        ws.cell(row=row, column=1, value=item.id)
+        ws.cell(row=row, column=2, value=item.item_name)
+        ws.cell(row=row, column=3, value=item.generic_name)
+        ws.cell(row=row, column=4, value=item.brand_name)
+        ws.cell(row=row, column=5, value=item.batch_number)
+        ws.cell(row=row, column=6, value=item.section.rack.rack_number if item.section and item.section.rack else "")
+        ws.cell(row=row, column=7, value=item.section.section_name if item.section else "")
+        ws.cell(row=row, column=8, value=item.quantity_software)
+        ws.cell(row=row, column=9, value=item.quantity_physical)
+        ws.cell(row=row, column=10, value=item.audit_discrepancy)
+        ws.cell(row=row, column=11, value=item.unit_price)
+        ws.cell(row=row, column=12, value=item.expiry_date.strftime("%Y-%m-%d") if item.expiry_date else "")
+        ws.cell(row=row, column=13, value=item.manufacturer)
+        ws.cell(row=row, column=14, value=item.last_audit_date.strftime("%Y-%m-%d %H:%M") if item.last_audit_date else "")
+        ws.cell(row=row, column=15, value=item.created_at.strftime("%Y-%m-%d %H:%M"))
+    
+    # Auto-adjust column widths
+    for col in ws.columns:
+        max_length = 0
+        column = col[0].column_letter
+        for cell in col:
+            if cell.value:
+                max_length = max(max_length, len(str(cell.value)))
+        ws.column_dimensions[column].width = min(max_length + 2, 50)
+    
+    # Save to BytesIO
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    
+    filename = f"stock_items_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+@router.get("/export/audit-records")
+def export_audit_records_excel(
+    days: int = Query(30, description="Number of days to export"),
+    db: Session = Depends(get_db),
+    current_user: Staff = Depends(get_current_user)
+):
+    """Export audit records to Excel"""
+    start_date = datetime.now() - timedelta(days=days)
+    records = db.query(models.StockAuditRecord).filter(
+        models.StockAuditRecord.shop_id == current_user.shop_id,
+        models.StockAuditRecord.audit_date >= start_date
+    ).all()
+    
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Audit Records"
+    
+    header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF")
+    
+    headers = ["ID", "Item Name", "Batch Number", "Rack", "Section", "Audit Date", "Staff Name",
+               "Software Qty", "Physical Qty", "Discrepancy", "Notes", "Resolved", "Resolution Notes"]
+    
+    for col, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=header)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+    
+    for row, record in enumerate(records, 2):
+        ws.cell(row=row, column=1, value=record.id)
+        ws.cell(row=row, column=2, value=record.stock_item.item_name if record.stock_item else "")
+        ws.cell(row=row, column=3, value=record.stock_item.batch_number if record.stock_item else "")
+        ws.cell(row=row, column=4, value=record.stock_item.section.rack.rack_number if record.stock_item and record.stock_item.section and record.stock_item.section.rack else "")
+        ws.cell(row=row, column=5, value=record.stock_item.section.section_name if record.stock_item and record.stock_item.section else "")
+        ws.cell(row=row, column=6, value=record.audit_date.strftime("%Y-%m-%d %H:%M"))
+        ws.cell(row=row, column=7, value=record.staff_name)
+        ws.cell(row=row, column=8, value=record.software_quantity)
+        ws.cell(row=row, column=9, value=record.physical_quantity)
+        ws.cell(row=row, column=10, value=record.discrepancy)
+        ws.cell(row=row, column=11, value=record.notes)
+        ws.cell(row=row, column=12, value="Yes" if record.resolved else "No")
+        ws.cell(row=row, column=13, value=record.resolution_notes)
+    
+    for col in ws.columns:
+        max_length = 0
+        column = col[0].column_letter
+        for cell in col:
+            if cell.value:
+                max_length = max(max_length, len(str(cell.value)))
+        ws.column_dimensions[column].width = min(max_length + 2, 50)
+    
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    
+    filename = f"audit_records_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+@router.get("/export/adjustments")
+def export_adjustments_excel(
+    days: int = Query(30, description="Number of days to export"),
+    db: Session = Depends(get_db),
+    current_user: Staff = Depends(get_current_user)
+):
+    """Export stock adjustments to Excel"""
+    start_date = datetime.now() - timedelta(days=days)
+    adjustments = db.query(models.StockAdjustment).filter(
+        models.StockAdjustment.shop_id == current_user.shop_id,
+        models.StockAdjustment.adjustment_date >= start_date
+    ).all()
+    
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Stock Adjustments"
+    
+    header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF")
+    
+    headers = ["ID", "Item Name", "Batch Number", "Rack", "Section", "Adjustment Type", 
+               "Quantity Change", "Reason", "Notes", "Staff Name", "Adjustment Date"]
+    
+    for col, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=header)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+    
+    for row, adj in enumerate(adjustments, 2):
+        ws.cell(row=row, column=1, value=adj.id)
+        ws.cell(row=row, column=2, value=adj.stock_item.item_name if adj.stock_item else "")
+        ws.cell(row=row, column=3, value=adj.stock_item.batch_number if adj.stock_item else "")
+        ws.cell(row=row, column=4, value=adj.stock_item.section.rack.rack_number if adj.stock_item and adj.stock_item.section and adj.stock_item.section.rack else "")
+        ws.cell(row=row, column=5, value=adj.stock_item.section.section_name if adj.stock_item and adj.stock_item.section else "")
+        ws.cell(row=row, column=6, value=adj.adjustment_type)
+        ws.cell(row=row, column=7, value=adj.quantity_change)
+        ws.cell(row=row, column=8, value=adj.reason)
+        ws.cell(row=row, column=9, value=adj.notes)
+        ws.cell(row=row, column=10, value=adj.staff_name)
+        ws.cell(row=row, column=11, value=adj.adjustment_date.strftime("%Y-%m-%d %H:%M"))
+    
+    for col in ws.columns:
+        max_length = 0
+        column = col[0].column_letter
+        for cell in col:
+            if cell.value:
+                max_length = max(max_length, len(str(cell.value)))
+        ws.column_dimensions[column].width = min(max_length + 2, 50)
+    
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    
+    filename = f"stock_adjustments_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )

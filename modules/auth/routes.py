@@ -34,13 +34,15 @@ def verify_super_admin_otp(request: VerifyOTPRequest, db: Session = Depends(get_
         token = AuthService.create_access_token({
             "user_id": super_admin.id,
             "user_type": "super_admin",
-            "email": super_admin.email
+            "email": super_admin.email,
+            "user_name": super_admin.full_name
         })
         
         return {
             "access_token": token,
             "token_type": "bearer",
             "user_type": "super_admin",
+            "user_name": super_admin.full_name,
             "organization_id": None,
             "shop_id": None,
             "shop_name": None
@@ -70,13 +72,15 @@ def super_admin_login(login_data: schemas.SuperAdminLogin, db: Session = Depends
     token = AuthService.create_access_token({
         "user_id": super_admin.id,
         "user_type": "super_admin",
-        "email": super_admin.email
+        "email": super_admin.email,
+        "user_name": super_admin.full_name
     })
     
     return {
         "access_token": token,
         "token_type": "bearer",
         "user_type": "super_admin",
+        "user_name": super_admin.full_name,
         "organization_id": None,
         "shop_id": None,
         "shop_name": None
@@ -161,13 +165,15 @@ def verify_admin_otp(request: VerifyOTPRequest, db: Session = Depends(get_db)):
             "user_id": admin.id,
             "user_type": "admin",
             "organization_id": admin.organization_id,
-            "email": admin.email
+            "email": admin.email,
+            "user_name": admin.full_name
         })
         
         return {
             "access_token": token,
             "token_type": "bearer",
             "user_type": "admin",
+            "user_name": admin.full_name,
             "organization_id": admin.organization_id,
             "shop_id": None,
             "shop_name": None
@@ -192,13 +198,15 @@ def admin_login(login_data: schemas.AdminLogin, db: Session = Depends(get_db)):
     token = AuthService.create_access_token({
         "user_id": admin.id,
         "user_type": "admin",
-        "email": admin.email
+        "email": admin.email,
+        "user_name": admin.full_name
     })
     
     return {
         "access_token": token,
         "token_type": "bearer",
         "user_type": "admin",
+        "user_name": admin.full_name,
         "shop_id": None,
         "shop_name": None
     }
@@ -427,13 +435,15 @@ def verify_staff_otp(request: VerifyStaffOTPRequest, db: Session = Depends(get_d
             "user_id": staff.id,
             "user_type": "staff",
             "shop_id": staff.shop_id,
-            "email": staff.email
+            "email": staff.email,
+            "user_name": staff.name
         })
         
         return {
             "access_token": token,
             "token_type": "bearer",
             "user_type": "staff",
+            "user_name": staff.name,
             "shop_id": staff.shop_id,
             "shop_name": staff.shop.shop_name
         }
@@ -457,13 +467,15 @@ def staff_login(login_data: schemas.StaffLogin, db: Session = Depends(get_db)):
         "user_id": staff.id,
         "user_type": "staff",
         "shop_id": staff.shop_id,
-        "email": staff.email
+        "email": staff.email,
+        "user_name": staff.name
     })
     
     return {
         "access_token": token,
         "token_type": "bearer",
         "user_type": "staff",
+        "user_name": staff.name,
         "shop_id": staff.shop_id,
         "shop_name": staff.shop.shop_name
     }

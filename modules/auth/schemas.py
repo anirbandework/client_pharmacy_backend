@@ -196,3 +196,4 @@ class TokenData(BaseModel):
     organization_id: Optional[str] = None  # For admins
     shop_id: Optional[int] = None
     email: Optional[str] = None
+    user_name: Optional[str] = None

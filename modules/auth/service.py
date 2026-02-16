@@ -40,6 +40,7 @@ class AuthService:
             organization_id: Optional[str] = payload.get("organization_id")
             shop_id: Optional[int] = payload.get("shop_id")
             email: Optional[str] = payload.get("email")
+            user_name: Optional[str] = payload.get("user_name")
             
             if user_id is None or user_type is None:
                 return None
@@ -49,7 +50,8 @@ class AuthService:
                 user_type=user_type,
                 organization_id=organization_id,
                 shop_id=shop_id,
-                email=email
+                email=email,
+                user_name=user_name
             )
         except JWTError:
             return None

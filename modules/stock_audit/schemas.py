@@ -54,6 +54,8 @@ class StockItem(StockItemBase):
     last_audit_date: Optional[datetime] = None
     audit_discrepancy: int = 0
     created_at: datetime
+    section_name: Optional[str] = None
+    rack_name: Optional[str] = None
     
     class Config:
         from_attributes = True
