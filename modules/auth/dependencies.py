@@ -11,7 +11,7 @@ def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db)
 ):
-    """Get current authenticated user (admin or staff)"""
+    """Get current authenticated user (super_admin, admin or staff)"""
     token = credentials.credentials
     token_data = AuthService.decode_token(token)
     
@@ -21,7 +21,9 @@ def get_current_user(
             detail="Invalid authentication credentials"
         )
     
-    if token_data.user_type == "admin":
+    if token_data.user_type == "super_admin":
+        user = db.query(models.SuperAdmin).filter(models.SuperAdmin.id == token_data.user_id).first()
+    elif token_data.user_type == "admin":
         user = db.query(models.Admin).filter(models.Admin.id == token_data.user_id).first()
     elif token_data.user_type == "staff":
         user = db.query(models.Staff).filter(models.Staff.id == token_data.user_id).first()
@@ -32,6 +34,12 @@ def get_current_user(
         raise HTTPException(status_code=401, detail="User not found or inactive")
     
     return {"user": user, "token_data": token_data}
+
+def get_current_super_admin(current_user: dict = Depends(get_current_user)):
+    """Require super admin authentication"""
+    if current_user["token_data"].user_type != "super_admin":
+        raise HTTPException(status_code=403, detail="SuperAdmin access required")
+    return current_user["user"]
 
 def get_current_admin(current_user: dict = Depends(get_current_user)):
     """Require admin authentication"""
@@ -52,7 +60,16 @@ def get_shop_context(current_user: dict = Depends(get_current_user)):
     if token_data.user_type == "staff":
         return token_data.shop_id
     
-    # Admin doesn't have automatic shop context
+    # Admin and SuperAdmin don't have automatic shop context
+    return None
+
+def get_organization_context(current_user: dict = Depends(get_current_user)):
+    """Get organization context from authenticated admin"""
+    token_data = current_user["token_data"]
+    
+    if token_data.user_type == "admin":
+        return token_data.organization_id
+    
     return None
 
 def require_permission(permission: str):

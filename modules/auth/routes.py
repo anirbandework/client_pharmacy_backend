@@ -5,10 +5,136 @@ from typing import List
 from datetime import datetime
 from . import schemas, models
 from .service import AuthService
-from .dependencies import get_current_admin, get_current_staff, require_permission
+from .dependencies import get_current_admin, get_current_staff, get_current_super_admin, require_permission
 from .otp import OTPService, SendOTPRequest, VerifyOTPRequest, SendStaffOTPRequest, VerifyStaffOTPRequest, OTPResponse
 
 router = APIRouter()
+
+# SUPER ADMIN AUTHENTICATION WITH OTP
+
+@router.post("/super-admin/send-otp", response_model=OTPResponse)
+async def send_super_admin_otp(request: SendOTPRequest, db: Session = Depends(get_db)):
+    """Send OTP to super admin phone for login"""
+    try:
+        otp = OTPService.create_super_admin_otp(db, request.phone, request.password)
+        return OTPResponse(
+            message="OTP sent successfully",
+            expires_in=300,
+            can_resend_in=30
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/super-admin/verify-otp", response_model=schemas.Token)
+def verify_super_admin_otp(request: VerifyOTPRequest, db: Session = Depends(get_db)):
+    """Verify OTP and login super admin"""
+    try:
+        super_admin = OTPService.verify_super_admin_otp(db, request.phone, request.otp_code)
+        
+        token = AuthService.create_access_token({
+            "user_id": super_admin.id,
+            "user_type": "super_admin",
+            "email": super_admin.email
+        })
+        
+        return {
+            "access_token": token,
+            "token_type": "bearer",
+            "user_type": "super_admin",
+            "organization_id": None,
+            "shop_id": None,
+            "shop_name": None
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+# SUPER ADMIN AUTHENTICATION (OLD)
+
+@router.post("/super-admin/register", response_model=schemas.SuperAdmin)
+def register_super_admin(super_admin_data: schemas.SuperAdminCreate, db: Session = Depends(get_db)):
+    """Register new super admin"""
+    existing = db.query(models.SuperAdmin).filter(models.SuperAdmin.email == super_admin_data.email).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    
+    super_admin = AuthService.create_super_admin(db, super_admin_data)
+    return super_admin
+
+@router.post("/super-admin/login", response_model=schemas.Token)
+def super_admin_login(login_data: schemas.SuperAdminLogin, db: Session = Depends(get_db)):
+    """SuperAdmin login (legacy - use OTP instead)"""
+    super_admin = AuthService.authenticate_super_admin(db, login_data.email, login_data.password)
+    if not super_admin:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    
+    token = AuthService.create_access_token({
+        "user_id": super_admin.id,
+        "user_type": "super_admin",
+        "email": super_admin.email
+    })
+    
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user_type": "super_admin",
+        "organization_id": None,
+        "shop_id": None,
+        "shop_name": None
+    }
+
+@router.get("/super-admin/me", response_model=schemas.SuperAdmin)
+def get_super_admin_profile(super_admin: models.SuperAdmin = Depends(get_current_super_admin)):
+    """Get current super admin profile"""
+    return super_admin
+
+# SUPER ADMIN - ADMIN MANAGEMENT
+
+@router.post("/super-admin/admins", response_model=schemas.Admin)
+def create_admin(
+    admin_data: schemas.AdminCreate,
+    super_admin: models.SuperAdmin = Depends(get_current_super_admin),
+    db: Session = Depends(get_db)
+):
+    """SuperAdmin creates admin with organization_id"""
+    existing = db.query(models.Admin).filter(models.Admin.phone == admin_data.phone).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Phone number already registered")
+    
+    admin = AuthService.create_admin(db, admin_data, super_admin.full_name)
+    return admin
+
+@router.get("/super-admin/admins", response_model=List[schemas.Admin])
+def get_all_admins(
+    super_admin: models.SuperAdmin = Depends(get_current_super_admin),
+    db: Session = Depends(get_db)
+):
+    """Get all admins"""
+    return db.query(models.Admin).all()
+
+@router.get("/super-admin/admins/organization/{organization_id}", response_model=List[schemas.Admin])
+def get_organization_admins(
+    organization_id: str,
+    super_admin: models.SuperAdmin = Depends(get_current_super_admin),
+    db: Session = Depends(get_db)
+):
+    """Get all admins with same organization_id"""
+    return db.query(models.Admin).filter(models.Admin.organization_id == organization_id).all()
+
+@router.get("/super-admin/shops", response_model=List[schemas.Shop])
+def get_all_shops_super(
+    super_admin: models.SuperAdmin = Depends(get_current_super_admin),
+    db: Session = Depends(get_db)
+):
+    """SuperAdmin: Get all shops"""
+    return AuthService.get_all_shops(db)
+
+@router.get("/super-admin/staff", response_model=List[schemas.Staff])
+def get_all_staff_super(
+    super_admin: models.SuperAdmin = Depends(get_current_super_admin),
+    db: Session = Depends(get_db)
+):
+    """SuperAdmin: Get all staff"""
+    return AuthService.get_all_staff(db)
 
 # ADMIN AUTHENTICATION WITH OTP
 
@@ -34,6 +160,7 @@ def verify_admin_otp(request: VerifyOTPRequest, db: Session = Depends(get_db)):
         token = AuthService.create_access_token({
             "user_id": admin.id,
             "user_type": "admin",
+            "organization_id": admin.organization_id,
             "email": admin.email
         })
         
@@ -41,6 +168,7 @@ def verify_admin_otp(request: VerifyOTPRequest, db: Session = Depends(get_db)):
             "access_token": token,
             "token_type": "bearer",
             "user_type": "admin",
+            "organization_id": admin.organization_id,
             "shop_id": None,
             "shop_name": None
         }
@@ -51,13 +179,8 @@ def verify_admin_otp(request: VerifyOTPRequest, db: Session = Depends(get_db)):
 
 @router.post("/admin/register", response_model=schemas.Admin)
 def register_admin(admin_data: schemas.AdminCreate, db: Session = Depends(get_db)):
-    """Register new admin (business owner)"""
-    existing = db.query(models.Admin).filter(models.Admin.phone == admin_data.phone).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="Phone number already registered")
-    
-    admin = AuthService.create_admin(db, admin_data)
-    return admin
+    """Register new admin (deprecated - use super admin to create)"""
+    raise HTTPException(status_code=403, detail="Please contact SuperAdmin to create admin account")
 
 @router.post("/admin/login", response_model=schemas.Token)
 def admin_login(login_data: schemas.AdminLogin, db: Session = Depends(get_db)):
@@ -106,16 +229,16 @@ def get_admin_shops(
     admin: models.Admin = Depends(get_current_admin),
     db: Session = Depends(get_db)
 ):
-    """Get all shops (shared visibility)"""
-    return AuthService.get_all_shops(db)
+    """Get all shops for admins with same organization_id"""
+    return AuthService.get_organization_shops(db, admin.organization_id)
 
 @router.get("/admin/all-shops", response_model=List[schemas.Shop])
 def get_all_shops(
     admin: models.Admin = Depends(get_current_admin),
     db: Session = Depends(get_db)
 ):
-    """Get all shops from all admins"""
-    return AuthService.get_all_shops(db)
+    """Get all shops for admins with same organization_id"""
+    return AuthService.get_organization_shops(db, admin.organization_id)
 
 @router.get("/admin/shops/{shop_id}", response_model=schemas.Shop)
 def get_shop(
@@ -139,10 +262,15 @@ def update_shop(
     admin: models.Admin = Depends(get_current_admin),
     db: Session = Depends(get_db)
 ):
-    """Update shop details (any admin can update any shop)"""
+    """Update shop details (admins with same organization_id can update)"""
     shop = db.query(models.Shop).filter(models.Shop.id == shop_id).first()
     if not shop:
         raise HTTPException(status_code=404, detail="Shop not found")
+    
+    # Check if shop belongs to same organization
+    shop_admin = db.query(models.Admin).filter(models.Admin.id == shop.admin_id).first()
+    if shop_admin.organization_id != admin.organization_id:
+        raise HTTPException(status_code=403, detail="Cannot update shop from different organization")
     
     for key, value in shop_data.model_dump(exclude_unset=True).items():
         setattr(shop, key, value)
@@ -187,10 +315,15 @@ def create_staff(
     admin: models.Admin = Depends(get_current_admin),
     db: Session = Depends(get_db)
 ):
-    """Create staff for any shop (any admin can create staff)"""
+    """Create staff for shop (admins with same organization_id can create)"""
     shop = db.query(models.Shop).filter(models.Shop.id == shop_id).first()
     if not shop:
         raise HTTPException(status_code=404, detail="Shop not found")
+    
+    # Check if shop belongs to same organization
+    shop_admin = db.query(models.Admin).filter(models.Admin.id == shop.admin_id).first()
+    if shop_admin.organization_id != admin.organization_id:
+        raise HTTPException(status_code=403, detail="Cannot create staff for shop from different organization")
     
     staff = AuthService.create_staff(db, shop_id, staff_data, admin.full_name)
     return staff
@@ -200,8 +333,8 @@ def get_all_staff(
     admin: models.Admin = Depends(get_current_admin),
     db: Session = Depends(get_db)
 ):
-    """Get all staff from all shops"""
-    return AuthService.get_all_staff(db)
+    """Get all staff for admins with same organization_id"""
+    return AuthService.get_organization_staff(db, admin.organization_id)
 
 @router.get("/shops/{shop_id}/staff", response_model=List[schemas.Staff])
 def get_shop_staff(
@@ -223,10 +356,16 @@ def update_staff(
     admin: models.Admin = Depends(get_current_admin),
     db: Session = Depends(get_db)
 ):
-    """Update staff details (any admin can update any staff)"""
+    """Update staff details (admins with same organization_id can update)"""
     staff = db.query(models.Staff).filter(models.Staff.id == staff_id).first()
     if not staff:
         raise HTTPException(status_code=404, detail="Staff not found")
+    
+    # Check if staff belongs to same organization
+    shop = db.query(models.Shop).filter(models.Shop.id == staff.shop_id).first()
+    shop_admin = db.query(models.Admin).filter(models.Admin.id == shop.admin_id).first()
+    if shop_admin.organization_id != admin.organization_id:
+        raise HTTPException(status_code=403, detail="Cannot update staff from different organization")
     
     for key, value in staff_data.model_dump(exclude_unset=True).items():
         setattr(staff, key, value)
@@ -244,10 +383,16 @@ def delete_staff(
     admin: models.Admin = Depends(get_current_admin),
     db: Session = Depends(get_db)
 ):
-    """Delete staff (any admin can delete any staff)"""
+    """Delete staff (admins with same organization_id can delete)"""
     staff = db.query(models.Staff).filter(models.Staff.id == staff_id).first()
     if not staff:
         raise HTTPException(status_code=404, detail="Staff not found")
+    
+    # Check if staff belongs to same organization
+    shop = db.query(models.Shop).filter(models.Shop.id == staff.shop_id).first()
+    shop_admin = db.query(models.Admin).filter(models.Admin.id == shop.admin_id).first()
+    if shop_admin.organization_id != admin.organization_id:
+        raise HTTPException(status_code=403, detail="Cannot delete staff from different organization")
     
     db.delete(staff)
     db.commit()

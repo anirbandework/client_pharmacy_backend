@@ -2,8 +2,40 @@ from pydantic import BaseModel, EmailStr, field_validator
 from typing import Optional, List
 from datetime import datetime, date
 
+# SuperAdmin Schemas
+class SuperAdminCreate(BaseModel):
+    email: EmailStr
+    password: str
+    full_name: str
+    phone: str
+    
+    @field_validator('password')
+    @classmethod
+    def validate_password(cls, v):
+        if len(v.encode('utf-8')) > 72:
+            raise ValueError('Password cannot be longer than 72 bytes')
+        if len(v) < 6:
+            raise ValueError('Password must be at least 6 characters')
+        return v
+
+class SuperAdminLogin(BaseModel):
+    email: EmailStr
+    password: str
+
+class SuperAdmin(BaseModel):
+    id: int
+    email: str
+    full_name: str
+    phone: str
+    is_active: bool
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
 # Admin Schemas
 class AdminCreate(BaseModel):
+    organization_id: str  # Shared ID for multiple admins
     phone: str
     password: str
     full_name: str
@@ -42,10 +74,12 @@ class AdminLogin(BaseModel):
 
 class Admin(BaseModel):
     id: int
+    organization_id: str
     email: Optional[str]
     full_name: str
     phone: str
     is_active: bool
+    created_by_super_admin: str
     created_at: datetime
     
     class Config:
@@ -151,12 +185,14 @@ class StaffLogin(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str
-    user_type: str  # admin, staff
+    user_type: str  # super_admin, admin, staff
+    organization_id: Optional[str] = None  # For admins
     shop_id: Optional[int] = None
     shop_name: Optional[str] = None
 
 class TokenData(BaseModel):
     user_id: int
-    user_type: str  # admin, staff
+    user_type: str  # super_admin, admin, staff
+    organization_id: Optional[str] = None  # For admins
     shop_id: Optional[int] = None
     email: Optional[str] = None

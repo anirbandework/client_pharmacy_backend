@@ -37,6 +37,7 @@ class AuthService:
             payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
             user_id: int = payload.get("user_id")
             user_type: str = payload.get("user_type")
+            organization_id: Optional[str] = payload.get("organization_id")
             shop_id: Optional[int] = payload.get("shop_id")
             email: Optional[str] = payload.get("email")
             
@@ -46,21 +47,48 @@ class AuthService:
             return schemas.TokenData(
                 user_id=user_id,
                 user_type=user_type,
+                organization_id=organization_id,
                 shop_id=shop_id,
                 email=email
             )
         except JWTError:
             return None
     
+    # SuperAdmin Authentication
+    @staticmethod
+    def create_super_admin(db: Session, super_admin_data: schemas.SuperAdminCreate) -> models.SuperAdmin:
+        hashed_password = AuthService.hash_password(super_admin_data.password)
+        db_super_admin = models.SuperAdmin(
+            email=super_admin_data.email,
+            phone=super_admin_data.phone,
+            password_hash=hashed_password,
+            full_name=super_admin_data.full_name
+        )
+        db.add(db_super_admin)
+        db.commit()
+        db.refresh(db_super_admin)
+        return db_super_admin
+    
+    @staticmethod
+    def authenticate_super_admin(db: Session, email: str, password: str) -> Optional[models.SuperAdmin]:
+        super_admin = db.query(models.SuperAdmin).filter(models.SuperAdmin.email == email).first()
+        if not super_admin or not super_admin.is_active:
+            return None
+        if not AuthService.verify_password(password, super_admin.password_hash):
+            return None
+        return super_admin
+    
     # Admin Authentication
     @staticmethod
-    def create_admin(db: Session, admin_data: schemas.AdminCreate) -> models.Admin:
+    def create_admin(db: Session, admin_data: schemas.AdminCreate, super_admin_name: str) -> models.Admin:
         hashed_password = AuthService.hash_password(admin_data.password)
         db_admin = models.Admin(
+            organization_id=admin_data.organization_id,
             phone=admin_data.phone,
             email=admin_data.email,
             password_hash=hashed_password,
-            full_name=admin_data.full_name
+            full_name=admin_data.full_name,
+            created_by_super_admin=super_admin_name
         )
         db.add(db_admin)
         db.commit()
@@ -108,6 +136,15 @@ class AuthService:
         return db.query(models.Shop).all()
     
     @staticmethod
+    def get_organization_shops(db: Session, organization_id: str):
+        """Get all shops for admins with same organization_id"""
+        admin_ids = db.query(models.Admin.id).filter(
+            models.Admin.organization_id == organization_id
+        ).all()
+        admin_ids = [aid[0] for aid in admin_ids]
+        return db.query(models.Shop).filter(models.Shop.admin_id.in_(admin_ids)).all()
+    
+    @staticmethod
     def get_admin_shops(db: Session, admin_id: int):
         return db.query(models.Shop).filter(models.Shop.admin_id == admin_id).all()
     
@@ -128,6 +165,17 @@ class AuthService:
     def get_all_staff(db: Session):
         """Get all staff from all shops"""
         return db.query(models.Staff).all()
+    
+    @staticmethod
+    def get_organization_staff(db: Session, organization_id: str):
+        """Get all staff for admins with same organization_id"""
+        admin_ids = db.query(models.Admin.id).filter(
+            models.Admin.organization_id == organization_id
+        ).all()
+        admin_ids = [aid[0] for aid in admin_ids]
+        shop_ids = db.query(models.Shop.id).filter(models.Shop.admin_id.in_(admin_ids)).all()
+        shop_ids = [sid[0] for sid in shop_ids]
+        return db.query(models.Staff).filter(models.Staff.shop_id.in_(shop_ids)).all()
     
     @staticmethod
     def get_shop_staff(db: Session, shop_id: int):

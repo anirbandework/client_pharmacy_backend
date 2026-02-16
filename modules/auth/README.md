@@ -1,24 +1,60 @@
-# Multi-Tenant Authentication System
+# Multi-Tenant Authentication System with SuperAdmin
 
 ## Overview
 
-A comprehensive authentication system for pharmacy management with:
-- **Admin** (Business Owner) - Manages multiple shops
+A comprehensive 4-tier authentication system for pharmacy management:
+- **SuperAdmin** (System Owner) - Creates and manages admins with organization IDs
+- **Admin** (Business Owner) - Manages shops within their organization
 - **Shop Manager** - Manages staff and operations for their shop
 - **Staff** - Access shop portal with role-based permissions
 
 ## Architecture
 
 ```
-Admin (Owner)
-  └── Shop 1
-       ├── Shop Manager (Staff with elevated permissions)
-       ├── Staff Member 1
-       └── Staff Member 2
-  └── Shop 2
-       ├── Shop Manager
-       └── Staff Member 1
+SuperAdmin
+  └── Organization: "PHARMACY-CHAIN-A"
+       ├── Admin 1 (Shares visibility with Admin 2 & 3)
+       │    ├── Shop 1
+       │    │    ├── Shop Manager
+       │    │    └── Staff Member 1
+       │    └── Shop 2
+       │         └── Staff Member 2
+       ├── Admin 2 (Shares visibility with Admin 1 & 3)
+       │    └── Shop 3
+       │         └── Staff Member 3
+       └── Admin 3 (Shares visibility with Admin 1 & 2)
+            └── Shop 4
+                 └── Staff Member 4
+  
+  └── Organization: "PHARMACY-CHAIN-B"
+       └── Admin 4 (Isolated from Chain A)
+            └── Shop 5
+                 └── Staff Member 5
 ```
+
+## 🆕 What's New: SuperAdmin & Organization System
+
+### Key Features
+1. **SuperAdmin Role**: System-level administrator who creates admins
+2. **Organization ID**: Groups multiple admins for shared visibility
+3. **Shared Management**: Admins with same organization_id can see/manage each other's shops and staff
+4. **Data Isolation**: Different organizations are completely isolated
+
+### Quick Start
+```bash
+# 1. Run migration
+python -m modules.auth.migrate_super_admin
+
+# 2. Create SuperAdmin
+POST /api/auth/super-admin/register
+
+# 3. Create admins with organization_id
+POST /api/auth/super-admin/admins
+```
+
+📖 **See [SUPER_ADMIN_GUIDE.md](SUPER_ADMIN_GUIDE.md) for complete documentation**
+
+📋 **See [SUPER_ADMIN_QUICK_REF.md](SUPER_ADMIN_QUICK_REF.md) for quick reference**
 
 ## Key Features
 

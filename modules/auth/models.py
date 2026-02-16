@@ -4,15 +4,28 @@ from datetime import datetime
 from app.database.database import Base
 import uuid
 
+class SuperAdmin(Base):
+    __tablename__ = "super_admins"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, unique=True, index=True, nullable=False)
+    password_hash = Column(String, nullable=False)
+    full_name = Column(String, nullable=False)
+    phone = Column(String(15), unique=True, index=True, nullable=False)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
 class Admin(Base):
     __tablename__ = "admins"
     
     id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(String, index=True, nullable=False)  # Shared ID for multiple admins
     email = Column(String, unique=True, index=True, nullable=True)  # Optional now
     password_hash = Column(String, nullable=False)
     full_name = Column(String, nullable=False)
     phone = Column(String(15), unique=True, index=True, nullable=False)  # Required for OTP
     is_active = Column(Boolean, default=True)
+    created_by_super_admin = Column(String, nullable=False)  # SuperAdmin name who created
     created_at = Column(DateTime, default=datetime.utcnow)
     
     shops = relationship("Shop", back_populates="admin")
