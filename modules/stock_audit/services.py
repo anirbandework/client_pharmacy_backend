@@ -255,7 +255,9 @@ class StockAuditService:
             StockItem.audit_discrepancy != 0
         ).count()
         
-        last_audit = query.with_entities(func.max(StockItem.last_audit_date)).scalar()
+        last_audit_item = query.filter(
+            StockItem.last_audit_date.isnot(None)
+        ).order_by(StockItem.last_audit_date.desc()).first()
         
         pending_audits = query.filter(
             StockItem.last_audit_date.is_(None)
@@ -265,7 +267,8 @@ class StockAuditService:
             "total_items": total_items,
             "total_sections": total_sections,
             "items_with_discrepancies": items_with_discrepancies,
-            "last_audit_date": last_audit,
+            "last_audit_date": last_audit_item.last_audit_date if last_audit_item else None,
+            "last_audited_by": last_audit_item.last_audit_by_staff_name if last_audit_item else None,
             "pending_audits": pending_audits,
             "audit_completion_rate": ((total_items - pending_audits) / total_items * 100) if total_items > 0 else 0
         }
