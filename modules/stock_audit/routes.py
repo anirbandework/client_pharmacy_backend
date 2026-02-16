@@ -205,7 +205,8 @@ def get_stock_items(
         item_dict = {
             **item.__dict__,
             "section_name": item.section.section_name if item.section else None,
-            "rack_name": item.section.rack.rack_number if item.section and item.section.rack else None
+            "rack_name": item.section.rack.rack_number if item.section and item.section.rack else None,
+            "total_value": (item.quantity_software * item.unit_price) if item.unit_price else None
         }
         result.append(item_dict)
     
@@ -229,7 +230,8 @@ def get_stock_item(
     item_dict = {
         **item.__dict__,
         "section_name": item.section.section_name if item.section else None,
-        "rack_name": item.section.rack.rack_number if item.section and item.section.rack else None
+        "rack_name": item.section.rack.rack_number if item.section and item.section.rack else None,
+        "total_value": (item.quantity_software * item.unit_price) if item.unit_price else None
     }
     return item_dict
 
@@ -700,7 +702,7 @@ def export_stock_items_excel(
     
     # Headers
     headers = ["ID", "Item Name", "Generic Name", "Brand Name", "Batch Number", "Rack", "Section", 
-               "Software Qty", "Physical Qty", "Discrepancy", "Unit Price", "Expiry Date", 
+               "Software Qty", "Physical Qty", "Discrepancy", "Unit Price", "Total Value", "Expiry Date", 
                "Manufacturer", "Last Audit Date", "Created At"]
     
     for col, header in enumerate(headers, 1):
@@ -722,10 +724,11 @@ def export_stock_items_excel(
         ws.cell(row=row, column=9, value=item.quantity_physical)
         ws.cell(row=row, column=10, value=item.audit_discrepancy)
         ws.cell(row=row, column=11, value=item.unit_price)
-        ws.cell(row=row, column=12, value=item.expiry_date.strftime("%Y-%m-%d") if item.expiry_date else "")
-        ws.cell(row=row, column=13, value=item.manufacturer)
-        ws.cell(row=row, column=14, value=item.last_audit_date.strftime("%Y-%m-%d %H:%M") if item.last_audit_date else "")
-        ws.cell(row=row, column=15, value=item.created_at.strftime("%Y-%m-%d %H:%M"))
+        ws.cell(row=row, column=12, value=(item.quantity_software * item.unit_price) if item.unit_price else None)
+        ws.cell(row=row, column=13, value=item.expiry_date.strftime("%Y-%m-%d") if item.expiry_date else "")
+        ws.cell(row=row, column=14, value=item.manufacturer)
+        ws.cell(row=row, column=15, value=item.last_audit_date.strftime("%Y-%m-%d %H:%M") if item.last_audit_date else "")
+        ws.cell(row=row, column=16, value=item.created_at.strftime("%Y-%m-%d %H:%M"))
     
     # Auto-adjust column widths
     for col in ws.columns:

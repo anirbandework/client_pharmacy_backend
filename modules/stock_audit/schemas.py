@@ -56,6 +56,7 @@ class StockItem(StockItemBase):
     created_at: datetime
     section_name: Optional[str] = None
     rack_name: Optional[str] = None
+    total_value: Optional[float] = None
     
     class Config:
         from_attributes = True
