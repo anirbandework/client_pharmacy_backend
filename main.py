@@ -74,7 +74,7 @@ app.include_router(attendance_router, prefix="/api/attendance", tags=["Attendanc
 app.include_router(notifications_router, prefix="/api/notifications", tags=["Notifications"])
 app.include_router(customer_router, prefix="/api/customers", tags=["Customer Tracking"])
 app.include_router(invoice_router, prefix="/api/invoices", tags=["Purchase Invoice Analyzer"])
-app.include_router(stock_router, prefix="/api/stock", tags=["Stock Audit"])
+app.include_router(stock_router, prefix="/api/stock-audit", tags=["Stock Audit"])
 app.include_router(daily_records_router, prefix="/api/daily-records", tags=["Daily Records"])
 app.include_router(profit_router, prefix="/api/profit", tags=["Profit Analysis"])
 

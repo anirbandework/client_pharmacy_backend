@@ -66,10 +66,12 @@ class PurchaseBase(BaseModel):
     total_amount: float
 
 class PurchaseCreate(PurchaseBase):
-    recorded_by: Optional[str] = None
+    pass
 
 class Purchase(PurchaseBase):
     id: int
+    staff_id: Optional[int] = None
+    staff_name: Optional[str] = None
     created_at: datetime
     
     class Config:
@@ -82,6 +84,7 @@ class PurchaseItemBase(BaseModel):
 
 class PurchaseItemCreate(PurchaseItemBase):
     stock_item_id: int
+    batch_number: Optional[str] = None
 
 class PurchaseItem(PurchaseItemBase):
     id: int
@@ -99,10 +102,12 @@ class SaleBase(BaseModel):
     total_amount: float
 
 class SaleCreate(SaleBase):
-    sold_by: Optional[str] = None
+    pass
 
 class Sale(SaleBase):
     id: int
+    staff_id: Optional[int] = None
+    staff_name: Optional[str] = None
     created_at: datetime
     
     class Config:
@@ -115,6 +120,7 @@ class SaleItemBase(BaseModel):
 
 class SaleItemCreate(SaleItemBase):
     stock_item_id: int
+    batch_number: Optional[str] = None
 
 class SaleItem(SaleItemBase):
     id: int
@@ -126,7 +132,6 @@ class SaleItem(SaleItemBase):
 
 # Audit Schemas
 class StockAuditRecordBase(BaseModel):
-    audited_by: str
     physical_quantity: int
     notes: Optional[str] = None
     reason_for_discrepancy: Optional[str] = None
@@ -137,6 +142,8 @@ class StockAuditRecordCreate(StockAuditRecordBase):
 class StockAuditRecord(StockAuditRecordBase):
     id: int
     stock_item_id: int
+    staff_id: Optional[int] = None
+    staff_name: Optional[str] = None
     audit_date: datetime
     software_quantity: int
     discrepancy: int
@@ -146,7 +153,6 @@ class StockAuditRecord(StockAuditRecordBase):
         from_attributes = True
 
 class StockAuditSessionBase(BaseModel):
-    auditor: str
     session_notes: Optional[str] = None
 
 class StockAuditSessionCreate(StockAuditSessionBase):
@@ -154,6 +160,8 @@ class StockAuditSessionCreate(StockAuditSessionBase):
 
 class StockAuditSession(StockAuditSessionBase):
     id: int
+    staff_id: Optional[int] = None
+    staff_name: Optional[str] = None
     session_date: date
     sections_audited: int = 0
     items_audited: int = 0
@@ -193,3 +201,22 @@ class PurchaseWithItems(BaseModel):
 class SaleWithItems(BaseModel):
     sale: Sale
     items: List[SaleItem]
+
+class StockAdjustmentBase(BaseModel):
+    adjustment_type: str
+    quantity_change: int
+    reason: str
+    notes: Optional[str] = None
+
+class StockAdjustmentCreate(StockAdjustmentBase):
+    stock_item_id: int
+
+class StockAdjustment(StockAdjustmentBase):
+    id: int
+    stock_item_id: int
+    staff_id: int
+    staff_name: str
+    adjustment_date: datetime
+    
+    class Config:
+        from_attributes = True

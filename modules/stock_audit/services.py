@@ -24,11 +24,11 @@ class StockCalculationService:
         return total_purchased - total_sold
     
     @staticmethod
-    def update_all_software_stock(db: Session) -> Dict[str, int]:
+    def update_all_software_stock(db: Session, shop_id: int) -> Dict[str, int]:
         """Update software stock for all items based on purchases/sales"""
         
         updated_count = 0
-        items = db.query(StockItem).all()
+        items = db.query(StockItem).filter(StockItem.shop_id == shop_id).all()
         
         for item in items:
             calculated_stock = StockCalculationService.calculate_software_stock(db, item.id)
@@ -45,25 +45,24 @@ class StockCalculationService:
         }
     
     @staticmethod
-    def add_purchase(db: Session, purchase_data: dict, items_data: List[dict]) -> Purchase:
+    def add_purchase(db: Session, purchase_data: dict, items_data: List[dict], shop_id: int, staff_id: int, staff_name: str) -> Purchase:
         """Add purchase and update stock levels"""
         
-        # Create purchase record
-        purchase = Purchase(**purchase_data)
+        purchase = Purchase(**purchase_data, shop_id=shop_id, staff_id=staff_id, staff_name=staff_name)
         db.add(purchase)
-        db.flush()  # Get the ID
+        db.flush()
         
         for item_data in items_data:
-            # Create purchase item
             purchase_item = PurchaseItem(
                 purchase_id=purchase.id,
+                shop_id=shop_id,
                 **item_data
             )
             db.add(purchase_item)
             
-            # Update stock item software quantity
             stock_item = db.query(StockItem).filter(
-                StockItem.id == item_data['stock_item_id']
+                StockItem.id == item_data['stock_item_id'],
+                StockItem.shop_id == shop_id
             ).first()
             if stock_item:
                 stock_item.quantity_software += item_data['quantity']
@@ -73,18 +72,17 @@ class StockCalculationService:
         return purchase
     
     @staticmethod
-    def add_sale(db: Session, sale_data: dict, items_data: List[dict]) -> Sale:
+    def add_sale(db: Session, sale_data: dict, items_data: List[dict], shop_id: int, staff_id: int, staff_name: str) -> Sale:
         """Add sale and update stock levels"""
         
-        # Create sale record
-        sale = Sale(**sale_data)
+        sale = Sale(**sale_data, shop_id=shop_id, staff_id=staff_id, staff_name=staff_name)
         db.add(sale)
-        db.flush()  # Get the ID
+        db.flush()
         
         for item_data in items_data:
-            # Check if enough stock available
             stock_item = db.query(StockItem).filter(
-                StockItem.id == item_data['stock_item_id']
+                StockItem.id == item_data['stock_item_id'],
+                StockItem.shop_id == shop_id
             ).first()
             
             if not stock_item:
@@ -93,14 +91,13 @@ class StockCalculationService:
             if stock_item.quantity_software < item_data['quantity']:
                 raise ValueError(f"Insufficient stock for {stock_item.item_name}. Available: {stock_item.quantity_software}, Required: {item_data['quantity']}")
             
-            # Create sale item
             sale_item = SaleItem(
                 sale_id=sale.id,
+                shop_id=shop_id,
                 **item_data
             )
             db.add(sale_item)
             
-            # Update stock item software quantity
             stock_item.quantity_software -= item_data['quantity']
             stock_item.updated_at = datetime.utcnow()
         
@@ -110,14 +107,13 @@ class StockCalculationService:
 class StockAuditService:
     
     @staticmethod
-    def get_random_section_for_audit(db: Session, exclude_recent_days: int = 7) -> Optional[Dict[str, Any]]:
+    def get_random_section_for_audit(db: Session, shop_id: int, exclude_recent_days: int = 7) -> Optional[Dict[str, Any]]:
         """Get a random section that hasn't been audited recently"""
         
-        # Get sections that haven't been audited recently
         cutoff_date = datetime.utcnow() - timedelta(days=exclude_recent_days)
         
-        # Find sections with items that need auditing
         sections_query = db.query(StockSection).join(StockItem).filter(
+            StockSection.shop_id == shop_id,
             or_(
                 StockItem.last_audit_date.is_(None),
                 StockItem.last_audit_date < cutoff_date
@@ -127,16 +123,13 @@ class StockAuditService:
         sections = sections_query.all()
         
         if not sections:
-            # If all sections audited recently, get any section
-            sections = db.query(StockSection).all()
+            sections = db.query(StockSection).filter(StockSection.shop_id == shop_id).all()
         
         if not sections:
             return None
         
-        # Select random section
         random_section = random.choice(sections)
         
-        # Get items in this section that need auditing
         items = db.query(StockItem).filter(
             StockItem.section_id == random_section.id
         ).all()
@@ -149,12 +142,14 @@ class StockAuditService:
         }
     
     @staticmethod
-    def start_audit_session(db: Session, auditor: str) -> StockAuditSession:
+    def start_audit_session(db: Session, staff_id: int, staff_name: str, shop_id: int) -> StockAuditSession:
         """Start a new audit session"""
         
         session = StockAuditSession(
-            auditor=auditor,
-            status="in_progress"
+            staff_id=staff_id,
+            staff_name=staff_name,
+            status="in_progress",
+            shop_id=shop_id
         )
         db.add(session)
         db.commit()
@@ -162,32 +157,36 @@ class StockAuditService:
         return session
     
     @staticmethod
-    def record_audit(db: Session, stock_item_id: int, physical_quantity: int, audited_by: str, notes: str = None) -> StockAuditRecord:
+    def record_audit(db: Session, stock_item_id: int, physical_quantity: int, staff_id: int, staff_name: str, notes: str = None, shop_id: int = None) -> StockAuditRecord:
         """Record audit result for a stock item"""
         
-        stock_item = db.query(StockItem).filter(StockItem.id == stock_item_id).first()
+        query = db.query(StockItem).filter(StockItem.id == stock_item_id)
+        if shop_id:
+            query = query.filter(StockItem.shop_id == shop_id)
+        stock_item = query.first()
+        
         if not stock_item:
             raise ValueError("Stock item not found")
         
-        # Calculate discrepancy
         software_quantity = stock_item.quantity_software
         discrepancy = software_quantity - physical_quantity
         
-        # Create audit record
         audit_record = StockAuditRecord(
             stock_item_id=stock_item_id,
-            audited_by=audited_by,
+            staff_id=staff_id,
+            staff_name=staff_name,
             software_quantity=software_quantity,
             physical_quantity=physical_quantity,
             discrepancy=discrepancy,
-            notes=notes
+            notes=notes,
+            shop_id=shop_id
         )
         db.add(audit_record)
         
-        # Update stock item
         stock_item.quantity_physical = physical_quantity
         stock_item.last_audit_date = datetime.utcnow()
-        stock_item.last_audit_by = audited_by
+        stock_item.last_audit_by_staff_id = staff_id
+        stock_item.last_audit_by_staff_name = staff_name
         stock_item.audit_discrepancy = discrepancy
         
         db.commit()
@@ -195,13 +194,18 @@ class StockAuditService:
         return audit_record
     
     @staticmethod
-    def get_discrepancies(db: Session, threshold: int = 0) -> List[Dict[str, Any]]:
+    def get_discrepancies(db: Session, threshold: int = 0, shop_id: int = None) -> List[Dict[str, Any]]:
         """Get all stock discrepancies above threshold"""
         
-        items = db.query(StockItem).join(StockSection).join(StockRack).filter(
+        query = db.query(StockItem).join(StockSection).join(StockRack).filter(
             StockItem.quantity_physical.isnot(None),
             func.abs(StockItem.audit_discrepancy) > threshold
-        ).all()
+        )
+        
+        if shop_id:
+            query = query.filter(StockItem.shop_id == shop_id)
+        
+        items = query.all()
         
         discrepancies = []
         for item in items:
@@ -213,7 +217,8 @@ class StockAuditService:
                 "section_name": item.section.section_name,
                 "rack_number": item.section.rack.rack_number,
                 "last_audit_date": item.last_audit_date,
-                "audited_by": item.last_audit_by
+                "audited_by_staff_id": item.last_audit_by_staff_id,
+                "audited_by_staff_name": item.last_audit_by_staff_name
             })
         
         return discrepancies
@@ -235,20 +240,24 @@ class StockAuditService:
         return session
     
     @staticmethod
-    def get_audit_summary(db: Session) -> Dict[str, Any]:
+    def get_audit_summary(db: Session, shop_id: int = None) -> Dict[str, Any]:
         """Get overall audit summary"""
         
-        total_items = db.query(StockItem).count()
-        total_sections = db.query(StockSection).count()
+        query = db.query(StockItem)
+        if shop_id:
+            query = query.filter(StockItem.shop_id == shop_id)
         
-        items_with_discrepancies = db.query(StockItem).filter(
+        total_items = query.count()
+        total_sections = db.query(StockSection).filter(StockSection.shop_id == shop_id).count() if shop_id else db.query(StockSection).count()
+        
+        items_with_discrepancies = query.filter(
             StockItem.quantity_physical.isnot(None),
             StockItem.audit_discrepancy != 0
         ).count()
         
-        last_audit = db.query(func.max(StockItem.last_audit_date)).scalar()
+        last_audit = query.with_entities(func.max(StockItem.last_audit_date)).scalar()
         
-        pending_audits = db.query(StockItem).filter(
+        pending_audits = query.filter(
             StockItem.last_audit_date.is_(None)
         ).count()
         
@@ -264,40 +273,48 @@ class StockAuditService:
 class StockReportService:
     
     @staticmethod
-    def get_low_stock_items(db: Session, threshold: int = 10) -> List[StockItem]:
+    def get_low_stock_items(db: Session, threshold: int = 10, shop_id: int = None) -> List[StockItem]:
         """Get items with low stock"""
         
-        return db.query(StockItem).filter(
-            StockItem.quantity_software <= threshold
-        ).all()
+        query = db.query(StockItem).filter(StockItem.quantity_software <= threshold)
+        if shop_id:
+            query = query.filter(StockItem.shop_id == shop_id)
+        return query.all()
     
     @staticmethod
-    def get_expiring_items(db: Session, days_ahead: int = 30) -> List[StockItem]:
+    def get_expiring_items(db: Session, days_ahead: int = 30, shop_id: int = None) -> List[StockItem]:
         """Get items expiring within specified days"""
         
         cutoff_date = date.today() + timedelta(days=days_ahead)
         
-        return db.query(StockItem).filter(
+        query = db.query(StockItem).filter(
             StockItem.expiry_date.isnot(None),
             StockItem.expiry_date <= cutoff_date,
             StockItem.quantity_software > 0
-        ).all()
+        )
+        if shop_id:
+            query = query.filter(StockItem.shop_id == shop_id)
+        return query.all()
     
     @staticmethod
-    def get_stock_movement_report(db: Session, start_date: date, end_date: date) -> Dict[str, Any]:
+    def get_stock_movement_report(db: Session, start_date: date, end_date: date, shop_id: int = None) -> Dict[str, Any]:
         """Get stock movement report for date range"""
         
-        # Purchases in date range
-        purchases = db.query(Purchase).filter(
+        purchase_query = db.query(Purchase).filter(
             Purchase.purchase_date >= start_date,
             Purchase.purchase_date <= end_date
-        ).all()
+        )
+        if shop_id:
+            purchase_query = purchase_query.filter(Purchase.shop_id == shop_id)
+        purchases = purchase_query.all()
         
-        # Sales in date range
-        sales = db.query(Sale).filter(
+        sale_query = db.query(Sale).filter(
             Sale.sale_date >= start_date,
             Sale.sale_date <= end_date
-        ).all()
+        )
+        if shop_id:
+            sale_query = sale_query.filter(Sale.shop_id == shop_id)
+        sales = sale_query.all()
         
         total_purchased = sum(p.total_amount for p in purchases)
         total_sold = sum(s.total_amount for s in sales)
