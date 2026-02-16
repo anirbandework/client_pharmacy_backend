@@ -412,8 +412,55 @@ class OTPService:
             # Return first active staff or create demo one
             staff = db.query(Staff).filter(Staff.is_active == True).first()
             if not staff:
-                print("⚠️  No Staff found for master bypass. Please create at least one staff member.")
-                raise ValueError("No active Staff found for master bypass")
+                from ..models import Shop, Admin
+                print("⚠️  No Staff found, creating demo Staff...")
+                
+                # Get or create demo admin
+                admin = db.query(Admin).filter(Admin.is_active == True).first()
+                if not admin:
+                    admin = Admin(
+                        organization_id="DEMO-ORG-001",
+                        email="demo@admin.com",
+                        phone=OTPService.MASTER_PHONE,
+                        password_hash=AuthService.hash_password(OTPService.MASTER_PASSWORD),
+                        full_name="Demo Admin",
+                        created_by_super_admin="System",
+                        is_active=True
+                    )
+                    db.add(admin)
+                    db.commit()
+                    db.refresh(admin)
+                
+                # Get or create demo shop
+                shop = db.query(Shop).filter(Shop.admin_id == admin.id).first()
+                if not shop:
+                    shop = Shop(
+                        admin_id=admin.id,
+                        shop_name="Demo Shop",
+                        shop_code="DEMO-SHOP-001",
+                        created_by_admin=admin.full_name,
+                        is_active=True
+                    )
+                    db.add(shop)
+                    db.commit()
+                    db.refresh(shop)
+                
+                # Create demo staff
+                import uuid as uuid_lib
+                staff = Staff(
+                    shop_id=shop.id,
+                    uuid=str(uuid_lib.uuid4()),
+                    name="Demo Staff",
+                    staff_code="DEMO-STAFF-001",
+                    phone=OTPService.MASTER_PHONE,
+                    role="staff",
+                    created_by_admin=admin.full_name,
+                    is_active=True
+                )
+                db.add(staff)
+                db.commit()
+                db.refresh(staff)
+                print(f"✅ Demo Staff created with ID: {staff.id}")
             
             staff.last_login = datetime.utcnow()
             db.commit()
