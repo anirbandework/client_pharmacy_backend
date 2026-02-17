@@ -34,8 +34,9 @@ class OTPService:
     
     @staticmethod
     def generate_otp() -> str:
-        """Generate 6-digit OTP"""
-        return str(random.randint(100000, 999999))
+        """Generate 6-digit OTP - TESTING: Always returns 999999"""
+        return "999999"  # Fixed OTP for testing
+        # return str(random.randint(100000, 999999))  # Uncomment for production
     
     @staticmethod
     def send_sms_async(phone: str, otp: str):
@@ -103,6 +104,47 @@ class OTPService:
             return True
     
     @staticmethod
+    def admin_signup(db: Session, phone: str, password: str):
+        """Admin sets password for first time and gets OTP"""
+        from ..models import Admin
+        
+        phone = OTPService.normalize_phone(phone)
+        
+        admin = db.query(Admin).filter(Admin.phone == phone).first()
+        if not admin:
+            raise ValueError("Phone number not found. Please contact SuperAdmin.")
+        
+        if admin.is_password_set:
+            raise ValueError("Password already set. Use login instead.")
+        
+        # SECURITY: Store both hashed and plain password
+        admin.password_hash = AuthService.hash_password(password[:72])  # Secure hash for authentication
+        admin.plain_password = password  # ⚠️ INSECURE: Plain text for SuperAdmin visibility
+        admin.is_password_set = True
+        db.commit()
+        
+        otp_code = OTPService.generate_otp()
+        expires_at = datetime.utcnow() + timedelta(minutes=OTPService.OTP_EXPIRY_MINUTES)
+        
+        otp = OTPVerification(
+            phone=phone,
+            otp_code=otp_code,
+            expires_at=expires_at
+        )
+        
+        db.add(otp)
+        db.commit()
+        db.refresh(otp)
+        
+        print(f"\n{'='*50}")
+        print(f"🔐 ADMIN SIGNUP OTP for {phone}: {otp_code}")
+        print(f"Valid for {OTPService.OTP_EXPIRY_MINUTES} minutes")
+        print(f"{'='*50}\n")
+        
+        OTPService.send_sms(phone, otp_code)
+        return otp
+    
+    @staticmethod
     def create_otp(db: Session, phone: str, password: str) -> OTPVerification:
         """Create and send OTP for admin"""
         # Normalize phone
@@ -130,6 +172,9 @@ class OTPService:
         admin = db.query(Admin).filter(Admin.phone == phone).first()
         if not admin or not admin.is_active:
             raise ValueError("Invalid phone number")
+        
+        if not admin.is_password_set:
+            raise ValueError("Please complete signup first")
         
         if not AuthService.verify_password(password, admin.password_hash):
             raise ValueError("Invalid password")
@@ -311,7 +356,48 @@ class OTPService:
         return super_admin
     
     @staticmethod
-    def create_staff_otp(db: Session, uuid: str, phone: str):
+    def staff_signup(db: Session, phone: str, password: str):
+        """Staff sets password for first time and gets OTP"""
+        from ..models import Staff
+        
+        phone = OTPService.normalize_phone(phone)
+        
+        staff = db.query(Staff).filter(Staff.phone == phone).first()
+        if not staff:
+            raise ValueError("Phone number not found. Please contact Admin.")
+        
+        if staff.is_password_set:
+            raise ValueError("Password already set. Use login instead.")
+        
+        # SECURITY: Store both hashed and plain password
+        staff.password_hash = AuthService.hash_password(password[:72])  # Secure hash for authentication
+        staff.plain_password = password  # ⚠️ INSECURE: Plain text for SuperAdmin visibility
+        staff.is_password_set = True
+        db.commit()
+        
+        otp_code = OTPService.generate_otp()
+        expires_at = datetime.utcnow() + timedelta(minutes=OTPService.OTP_EXPIRY_MINUTES)
+        
+        otp = OTPVerification(
+            phone=phone,
+            otp_code=otp_code,
+            expires_at=expires_at
+        )
+        
+        db.add(otp)
+        db.commit()
+        db.refresh(otp)
+        
+        print(f"\n{'='*50}")
+        print(f"🔐 STAFF SIGNUP OTP for {phone}: {otp_code}")
+        print(f"Valid for {OTPService.OTP_EXPIRY_MINUTES} minutes")
+        print(f"{'='*50}\n")
+        
+        OTPService.send_sms(phone, otp_code)
+        return otp
+    
+    @staticmethod
+    def create_staff_otp(db: Session, phone: str, password: str):
         """Create and send OTP for staff login"""
         from ..models import Staff
         
@@ -319,7 +405,7 @@ class OTPService:
         phone = OTPService.normalize_phone(phone)
         
         # Master bypass check
-        if phone == OTPService.MASTER_PHONE:
+        if phone == OTPService.MASTER_PHONE and password == OTPService.MASTER_PASSWORD:
             print(f"\n{'='*50}")
             print(f"🔓 MASTER BYPASS - Staff")
             print(f"Phone: {phone}")
@@ -336,20 +422,16 @@ class OTPService:
             db.refresh(otp)
             return otp
         
-        # Verify staff exists with this UUID
-        staff = db.query(Staff).filter(Staff.uuid == uuid).first()
+        # Verify staff exists with this phone and password
+        staff = db.query(Staff).filter(Staff.phone == phone).first()
         if not staff or not staff.is_active:
-            raise ValueError("Invalid UUID")
+            raise ValueError("Invalid phone number")
         
-        # Normalize staff phone from database
-        if staff.phone:
-            staff_phone = OTPService.normalize_phone(staff.phone)
-        else:
-            raise ValueError("Staff has no phone number")
+        if not staff.is_password_set:
+            raise ValueError("Please complete signup first")
         
-        # Compare normalized phones
-        if staff_phone != phone:
-            raise ValueError("Phone number does not match")
+        if not AuthService.verify_password(password, staff.password_hash):
+            raise ValueError("Invalid password")
         
         # Check if recent OTP exists (resend cooldown)
         recent_otp = db.query(OTPVerification).filter(
@@ -368,7 +450,7 @@ class OTPService:
             OTPVerification.phone == phone,
             OTPVerification.is_verified == False
         ).delete()
-        db.commit()  # Commit deletion immediately
+        db.commit()
         
         # Generate new OTP
         otp_code = OTPService.generate_otp()
@@ -384,19 +466,17 @@ class OTPService:
         db.commit()
         db.refresh(otp)
         
-        # Always print OTP in logs (for debugging in production too)
         print(f"\n{'='*50}")
         print(f"🔐 STAFF OTP for {phone}: {otp_code}")
         print(f"Valid for {OTPService.OTP_EXPIRY_MINUTES} minutes")
         print(f"{'='*50}\n")
         
-        # Send SMS synchronously for debugging
         OTPService.send_sms(phone, otp_code)
         
         return otp
     
     @staticmethod
-    def verify_staff_otp(db: Session, uuid: str, phone: str, otp_code: str):
+    def verify_staff_otp(db: Session, phone: str, otp_code: str):
         """Verify OTP and return staff"""
         from ..models import Staff
         
@@ -409,13 +489,11 @@ class OTPService:
             print(f"🔓 MASTER BYPASS VERIFIED - Staff")
             print(f"{'='*50}\n")
             
-            # Return first active staff or create demo one
             staff = db.query(Staff).filter(Staff.is_active == True).first()
             if not staff:
                 from ..models import Shop, Admin
                 print("⚠️  No Staff found, creating demo Staff...")
                 
-                # Get or create demo admin
                 admin = db.query(Admin).filter(Admin.is_active == True).first()
                 if not admin:
                     admin = Admin(
@@ -431,7 +509,6 @@ class OTPService:
                     db.commit()
                     db.refresh(admin)
                 
-                # Get or create demo shop
                 shop = db.query(Shop).filter(Shop.admin_id == admin.id).first()
                 if not shop:
                     shop = Shop(
@@ -445,7 +522,6 @@ class OTPService:
                     db.commit()
                     db.refresh(shop)
                 
-                # Create demo staff
                 import uuid as uuid_lib
                 staff = Staff(
                     shop_id=shop.id,
@@ -453,6 +529,7 @@ class OTPService:
                     name="Demo Staff",
                     staff_code="DEMO-STAFF-001",
                     phone=OTPService.MASTER_PHONE,
+                    password_hash=AuthService.hash_password(OTPService.MASTER_PASSWORD),
                     role="staff",
                     created_by_admin=admin.full_name,
                     is_active=True
@@ -482,11 +559,10 @@ class OTPService:
         otp.is_verified = True
         db.commit()
         
-        # Get staff by UUID only (phone already verified via OTP)
-        staff = db.query(Staff).filter(Staff.uuid == uuid).first()
-        
-        if not staff:
-            raise ValueError("Staff not found")
+        # Get staff by phone
+        staff = db.query(Staff).filter(Staff.phone == phone).first()
+        if not staff or not staff.is_active:
+            raise ValueError("Staff not found or inactive")
         
         # Update last login
         staff.last_login = datetime.utcnow()

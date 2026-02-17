@@ -21,10 +21,12 @@ class Admin(Base):
     id = Column(Integer, primary_key=True, index=True)
     organization_id = Column(String, index=True, nullable=False)  # Shared ID for multiple admins
     email = Column(String, unique=True, index=True, nullable=True)  # Optional now
-    password_hash = Column(String, nullable=False)
+    password_hash = Column(String, nullable=True)  # Nullable - set during signup
+    plain_password = Column(String, nullable=True)  # ⚠️ SECURITY RISK: Plain text password for SuperAdmin visibility
     full_name = Column(String, nullable=False)
     phone = Column(String(15), unique=True, index=True, nullable=False)  # Required for OTP
     is_active = Column(Boolean, default=True)
+    is_password_set = Column(Boolean, default=False)  # Track if user completed signup
     created_by_super_admin = Column(String, nullable=False)  # SuperAdmin name who created
     created_at = Column(DateTime, default=datetime.utcnow)
     
@@ -66,7 +68,9 @@ class Staff(Base):
     uuid = Column(String, unique=True, index=True, nullable=False, default=lambda: str(uuid.uuid4()))
     name = Column(String, nullable=False)  # Changed from full_name to name
     staff_code = Column(String, unique=True, index=True, nullable=False)  # Added staff_code
-    phone = Column(String, nullable=True)
+    phone = Column(String, unique=True, index=True, nullable=False)  # Required for OTP login
+    password_hash = Column(String, nullable=True)  # Nullable - set during signup
+    plain_password = Column(String, nullable=True)  # ⚠️ SECURITY RISK: Plain text password for SuperAdmin visibility
     email = Column(String, nullable=True)
     
     role = Column(String, default="staff")  # staff, shop_manager
@@ -82,6 +86,8 @@ class Staff(Base):
     can_manage_inventory = Column(Boolean, default=True)
     can_manage_customers = Column(Boolean, default=True)
     
+    is_password_set = Column(Boolean, default=False)  # Track if user completed signup
+    
     # Audit fields
     created_by_admin = Column(String, nullable=False)  # Admin name who created
     updated_by_admin = Column(String, nullable=True)   # Admin name who last updated
@@ -92,8 +98,8 @@ class Staff(Base):
     last_login = Column(DateTime, nullable=True)
     
     shop = relationship("Shop", back_populates="staff")
-    salary_records = relationship("SalaryRecord", back_populates="staff")
-    payment_info = relationship("StaffPaymentInfo", back_populates="staff", uselist=False)
+    salary_records = relationship("SalaryRecord", back_populates="staff", cascade="all, delete-orphan")
+    payment_info = relationship("StaffPaymentInfo", back_populates="staff", uselist=False, cascade="all, delete-orphan")
     # Attendance relationships with cascade delete
     devices = relationship("StaffDevice", foreign_keys="[StaffDevice.staff_id]", back_populates="staff", cascade="all, delete-orphan")
     attendance_records = relationship("AttendanceRecord", foreign_keys="[AttendanceRecord.staff_id]", back_populates="staff", cascade="all, delete-orphan")

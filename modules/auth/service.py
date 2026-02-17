@@ -38,7 +38,7 @@ class AuthService:
             user_id: int = payload.get("user_id")
             user_type: str = payload.get("user_type")
             organization_id: Optional[str] = payload.get("organization_id")
-            shop_id: Optional[int] = payload.get("shop_id")
+            shop_code: Optional[str] = payload.get("shop_code")  # Changed from shop_id to shop_code
             email: Optional[str] = payload.get("email")
             user_name: Optional[str] = payload.get("user_name")
             
@@ -49,7 +49,7 @@ class AuthService:
                 user_id=user_id,
                 user_type=user_type,
                 organization_id=organization_id,
-                shop_id=shop_id,
+                shop_code=shop_code,  # Changed from shop_id to shop_code
                 email=email,
                 user_name=user_name
             )
@@ -83,13 +83,13 @@ class AuthService:
     # Admin Authentication
     @staticmethod
     def create_admin(db: Session, admin_data: schemas.AdminCreate, super_admin_name: str) -> models.Admin:
-        hashed_password = AuthService.hash_password(admin_data.password)
         db_admin = models.Admin(
             organization_id=admin_data.organization_id,
             phone=admin_data.phone,
             email=admin_data.email,
-            password_hash=hashed_password,
+            password_hash=None,  # Set during signup
             full_name=admin_data.full_name,
+            is_password_set=False,
             created_by_super_admin=super_admin_name
         )
         db.add(db_admin)
@@ -153,10 +153,13 @@ class AuthService:
     # Staff Management
     @staticmethod
     def create_staff(db: Session, shop_id: int, staff_data: schemas.StaffCreate, admin_name: str) -> models.Staff:
+        staff_dict = staff_data.model_dump()
         db_staff = models.Staff(
             shop_id=shop_id,
+            password_hash=None,  # Set during signup
+            is_password_set=False,
             created_by_admin=admin_name,
-            **staff_data.model_dump()
+            **staff_dict
         )
         db.add(db_staff)
         db.commit()

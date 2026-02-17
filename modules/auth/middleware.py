@@ -16,15 +16,15 @@ class ShopContextMiddleware(BaseHTTPMiddleware):
             if token_data:
                 request.state.user_id = token_data.user_id
                 request.state.user_type = token_data.user_type
-                request.state.shop_id = token_data.shop_id
+                request.state.shop_code = token_data.shop_code  # Changed from shop_id to shop_code
             else:
                 request.state.user_id = None
                 request.state.user_type = None
-                request.state.shop_id = None
+                request.state.shop_code = None
         else:
             request.state.user_id = None
             request.state.user_type = None
-            request.state.shop_id = None
+            request.state.shop_code = None
         
         response = await call_next(request)
         return response

@@ -28,36 +28,7 @@ class SendOTPRequest(BaseModel):
             raise ValueError('Invalid Indian phone number')
         return phone
 
-class SendStaffOTPRequest(BaseModel):
-    uuid: str
-    phone: str
-    
-    @field_validator('phone')
-    @classmethod
-    def validate_phone(cls, v):
-        phone = normalize_phone(v)
-        if not re.match(r'^\+91\d{10}$', phone):
-            raise ValueError('Invalid Indian phone number')
-        return phone
-
 class VerifyOTPRequest(BaseModel):
-    phone: str
-    otp_code: str
-    
-    @field_validator('phone')
-    @classmethod
-    def validate_phone(cls, v):
-        return normalize_phone(v)
-    
-    @field_validator('otp_code')
-    @classmethod
-    def validate_otp(cls, v):
-        if not v.isdigit() or len(v) != 6:
-            raise ValueError('OTP must be 6 digits')
-        return v
-
-class VerifyStaffOTPRequest(BaseModel):
-    uuid: str
     phone: str
     otp_code: str
     
