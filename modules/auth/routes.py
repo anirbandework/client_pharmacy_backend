@@ -737,6 +737,12 @@ def verify_staff_otp(request: VerifyOTPRequest, db: Session = Depends(get_db)):
         }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        # Log the full error for debugging
+        import traceback
+        print(f"Error in verify_staff_otp: {str(e)}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 # STAFF AUTHENTICATION (OLD - UUID only)
 

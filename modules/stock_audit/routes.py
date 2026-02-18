@@ -23,8 +23,11 @@ def get_current_user(user_dict: dict = Depends(get_user_dict), db: Session = Dep
     if not shop_code:
         raise HTTPException(status_code=400, detail="Shop code not found in token")
     
-    # Resolve shop_id from shop_code
-    shop = db.query(Shop).filter(Shop.shop_code == shop_code).first()
+    # Resolve shop_id from shop_code for the staff's admin
+    shop = db.query(Shop).filter(
+        Shop.shop_code == shop_code,
+        Shop.admin_id == staff.shop.admin_id
+    ).first()
     if not shop:
         raise HTTPException(status_code=404, detail=f"Shop not found with code: {shop_code}")
     
@@ -62,7 +65,6 @@ def get_racks(
 ):
     """Get all store racks"""
     staff, shop_id = current_user
-    staff, shop_id = current_user
     return db.query(models.StockRack).filter(models.StockRack.shop_id == shop_id).all()
 
 @router.put("/racks/{rack_id}", response_model=schemas.StoreRack)
@@ -96,7 +98,6 @@ def delete_rack(
 ):
     """Delete store rack"""
     staff, shop_id = current_user
-    staff, shop_id = current_user
     db_rack = db.query(models.StockRack).filter(
         models.StockRack.id == rack_id,
         models.StockRack.shop_id == shop_id
@@ -115,6 +116,7 @@ def create_section(
     current_user: tuple = Depends(get_current_user)
 ):
     """Create a new store section"""
+    staff, shop_id = current_user
     existing = db.query(models.StockSection).filter(
         models.StockSection.section_code == section.section_code,
         models.StockSection.shop_id == shop_id
@@ -149,6 +151,7 @@ def update_section(
     current_user: tuple = Depends(get_current_user)
 ):
     """Update store section"""
+    staff, shop_id = current_user
     db_section = db.query(models.StockSection).filter(
         models.StockSection.id == section_id,
         models.StockSection.shop_id == shop_id
@@ -191,6 +194,7 @@ def add_stock_item(
     current_user: tuple = Depends(get_current_user)
 ):
     """Add new stock item"""
+    staff, shop_id = current_user
     db_item = models.StockItem(**item.model_dump(), shop_id=shop_id)
     db.add(db_item)
     db.commit()
@@ -240,6 +244,7 @@ def get_stock_item(
     current_user: tuple = Depends(get_current_user)
 ):
     """Get specific stock item"""
+    staff, shop_id = current_user
     item = db.query(models.StockItem).filter(
         models.StockItem.id == item_id,
         models.StockItem.shop_id == shop_id
@@ -286,6 +291,7 @@ def delete_stock_item(
     current_user: tuple = Depends(get_current_user)
 ):
     """Delete stock item"""
+    staff, shop_id = current_user
     db_item = db.query(models.StockItem).filter(
         models.StockItem.id == item_id,
         models.StockItem.shop_id == shop_id
@@ -331,6 +337,7 @@ def get_purchases(
     current_user: tuple = Depends(get_current_user)
 ):
     """Get purchases with filters"""
+    staff, shop_id = current_user
     query = db.query(models.Purchase).filter(models.Purchase.shop_id == shop_id)
     
     if start_date:
@@ -373,6 +380,7 @@ def delete_purchase(
     current_user: tuple = Depends(get_current_user)
 ):
     """Delete purchase record"""
+    staff, shop_id = current_user
     db_purchase = db.query(models.Purchase).filter(
         models.Purchase.id == purchase_id,
         models.Purchase.shop_id == shop_id
@@ -418,6 +426,7 @@ def get_sales(
     current_user: tuple = Depends(get_current_user)
 ):
     """Get sales with filters"""
+    staff, shop_id = current_user
     query = db.query(models.Sale).filter(models.Sale.shop_id == shop_id)
     
     if start_date:
@@ -460,6 +469,7 @@ def delete_sale(
     current_user: tuple = Depends(get_current_user)
 ):
     """Delete sale record"""
+    staff, shop_id = current_user
     db_sale = db.query(models.Sale).filter(
         models.Sale.id == sale_id,
         models.Sale.shop_id == shop_id
@@ -492,6 +502,7 @@ def start_audit_session(
     current_user: tuple = Depends(get_current_user)
 ):
     """Start new audit session"""
+    staff, shop_id = current_user
     return services.StockAuditService.start_audit_session(db, staff.id, staff.name, shop_id)
 
 @router.put("/items/{item_id}/audit", response_model=schemas.StockAuditRecord)
@@ -920,4 +931,3 @@ def export_adjustments_excel(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
-    staff, shop_id = current_user

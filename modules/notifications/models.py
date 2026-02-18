@@ -70,8 +70,11 @@ class NotificationRead(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     notification_id = Column(Integer, ForeignKey("notifications.id"), nullable=False)
-    staff_id = Column(Integer, ForeignKey("staff.id"), nullable=False)
+    staff_id = Column(Integer, ForeignKey("staff.id"), nullable=False, index=True)
+    staff_name = Column(String, nullable=False)  # Audit trail
+    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False, index=True)  # Shop-level filtering
     read_at = Column(DateTime, default=datetime.utcnow)
     
     notification = relationship("Notification", back_populates="reads")
     staff = relationship("Staff")
+    shop = relationship("Shop")

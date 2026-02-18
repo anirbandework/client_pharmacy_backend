@@ -155,7 +155,9 @@ class NotificationService:
         if not existing:
             read_record = NotificationRead(
                 notification_id=notification_id,
-                staff_id=staff.id
+                staff_id=staff.id,
+                staff_name=staff.name,  # Audit trail
+                shop_id=staff.shop_id  # Shop-level filtering
             )
             db.add(read_record)
             db.commit()

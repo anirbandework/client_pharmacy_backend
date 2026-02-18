@@ -479,6 +479,7 @@ class OTPService:
     def verify_staff_otp(db: Session, phone: str, otp_code: str):
         """Verify OTP and return staff"""
         from ..models import Staff
+        from sqlalchemy.orm import joinedload
         
         # Normalize phone number
         phone = OTPService.normalize_phone(phone)
@@ -541,6 +542,7 @@ class OTPService:
             
             staff.last_login = datetime.utcnow()
             db.commit()
+            db.refresh(staff)
             return staff
         
         otp = db.query(OTPVerification).filter(
@@ -559,14 +561,15 @@ class OTPService:
         otp.is_verified = True
         db.commit()
         
-        # Get staff by phone
-        staff = db.query(Staff).filter(Staff.phone == phone).first()
+        # Get staff by phone with shop relationship loaded
+        staff = db.query(Staff).options(joinedload(Staff.shop)).filter(Staff.phone == phone).first()
         if not staff or not staff.is_active:
             raise ValueError("Staff not found or inactive")
         
         # Update last login
         staff.last_login = datetime.utcnow()
         db.commit()
+        db.refresh(staff)
         
         return staff
     

@@ -8,6 +8,10 @@ echo "PORT: $PORT"
 echo "DATABASE_URL: ${DATABASE_URL:0:20}..."
 echo "REDIS_URL: ${REDIS_URL:0:20}..."
 
+# Run Alembic migrations
+echo "🔄 Running database migrations..."
+alembic upgrade head
+
 # Start FastAPI application
 echo "🌐 Starting FastAPI server on 0.0.0.0:$PORT..."
 exec uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --log-level info

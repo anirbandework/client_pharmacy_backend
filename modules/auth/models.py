@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, Float, Date
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, Float, Date, UniqueConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.database.database import Base
@@ -34,12 +34,15 @@ class Admin(Base):
 
 class Shop(Base):
     __tablename__ = "shops"
+    __table_args__ = (
+        UniqueConstraint('shop_code', 'admin_id', name='unique_shop_code_per_admin'),
+    )
     
     id = Column(Integer, primary_key=True, index=True)
     admin_id = Column(Integer, ForeignKey("admins.id"), nullable=False)
     
     shop_name = Column(String, nullable=False)
-    shop_code = Column(String, unique=True, index=True, nullable=False)
+    shop_code = Column(String, index=True, nullable=False)
     address = Column(Text, nullable=True)
     phone = Column(String, nullable=True)
     email = Column(String, nullable=True)
@@ -57,7 +60,17 @@ class Shop(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     
     admin = relationship("Admin", back_populates="shops")
-    staff = relationship("Staff", back_populates="shop")
+    staff = relationship("Staff", back_populates="shop", cascade="all, delete-orphan")
+    stock_racks = relationship("StockRack", cascade="all, delete-orphan")
+    stock_sections = relationship("StockSection", cascade="all, delete-orphan")
+    stock_items = relationship("StockItem", cascade="all, delete-orphan")
+    purchases = relationship("Purchase", cascade="all, delete-orphan")
+    purchase_items = relationship("PurchaseItem", cascade="all, delete-orphan")
+    sales = relationship("Sale", cascade="all, delete-orphan")
+    sale_items = relationship("SaleItem", cascade="all, delete-orphan")
+    audit_records = relationship("StockAuditRecord", cascade="all, delete-orphan")
+    audit_sessions = relationship("StockAuditSession", cascade="all, delete-orphan")
+    stock_adjustments = relationship("StockAdjustment", cascade="all, delete-orphan")
 
 class Staff(Base):
     __tablename__ = "staff"
@@ -100,7 +113,6 @@ class Staff(Base):
     shop = relationship("Shop", back_populates="staff")
     salary_records = relationship("SalaryRecord", back_populates="staff", cascade="all, delete-orphan")
     payment_info = relationship("StaffPaymentInfo", back_populates="staff", uselist=False, cascade="all, delete-orphan")
-    # Attendance relationships with cascade delete
     devices = relationship("StaffDevice", foreign_keys="[StaffDevice.staff_id]", back_populates="staff", cascade="all, delete-orphan")
     attendance_records = relationship("AttendanceRecord", foreign_keys="[AttendanceRecord.staff_id]", back_populates="staff", cascade="all, delete-orphan")
     leave_requests = relationship("LeaveRequest", foreign_keys="[LeaveRequest.staff_id]", back_populates="staff", cascade="all, delete-orphan")

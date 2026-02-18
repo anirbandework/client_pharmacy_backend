@@ -1,30 +1,45 @@
 # Notifications Module
 
-Efficient notification system for admins to send messages to shops and staff.
+Complete notification system for admins to send messages to shops and staff with real-time frontend integration.
 
 ## Features
 
 - ✅ **Shop-level notifications**: Send to all staff in selected shops
 - ✅ **Direct staff notifications**: Send to specific staff members
 - ✅ **Organization-scoped**: Admins can only notify their organization's shops/staff
-- ✅ **Read tracking**: Track which staff have read notifications
-- ✅ **Statistics**: View read rates and engagement
+- ✅ **Read tracking**: Track which staff have read notifications with audit trail
+- ✅ **Statistics**: View read rates and engagement metrics
 - ✅ **Expiry support**: Optional expiration dates for notifications
 - ✅ **Type classification**: Info, Warning, Urgent, Announcement
+- ✅ **Real-time updates**: Frontend polling every 30 seconds
+- ✅ **Role-based UI**: Different interfaces for admin and staff
+- ✅ **Notification bell**: Unread count indicator in navbar
 
 ## Database Schema
 
 ### Tables
-1. **notifications** - Main notification content
+1. **notifications** - Main notification content with admin info
 2. **notification_shop_targets** - Shops targeted by notification
 3. **notification_staff_targets** - Staff targeted directly
-4. **notification_reads** - Track read status per staff
+4. **notification_reads** - Track read status with staff_name and shop_id audit trail
 
-### Efficient Design
-- Shop notifications automatically visible to all staff in that shop
-- No duplicate storage - one notification, multiple targets
-- Indexed queries for fast retrieval
-- Cascade deletes for cleanup
+### Schema Updates
+- Added `staff_name` column to notification_reads for audit trail
+- Added `shop_id` column to notification_reads for better tracking
+- Proper foreign key relationships and indexes
+
+## Migration Status
+
+✅ **Database Updated**: notification_reads table now includes:
+- `staff_name` (TEXT) - For audit trail
+- `shop_id` (INTEGER) - Links to shops table
+- Proper indexes for performance
+
+Run migration:
+```bash
+alembic upgrade head
+# Or manually updated via SQL for SQLite compatibility
+```
 
 ## API Endpoints
 
@@ -159,6 +174,31 @@ Response:
 4. **Pagination**: Limit parameter to control result size
 5. **Smart Filtering**: Excludes expired and already-read notifications
 
+## Frontend Integration
+
+### Components
+- **NotificationBell.jsx** - Shows unread count in navbar (staff only)
+- **StaffNotifications.jsx** - Staff notification list with real-time updates
+- **SendNotification.jsx** - Admin form to send notifications
+- **SentNotifications.jsx** - Admin view of sent notifications with stats
+
+### Routes
+- `/notifications` - Admin notifications page
+- `/my-notifications` - Staff notifications page
+
+### Features
+- ✅ **Real-time polling** - Updates every 30 seconds
+- ✅ **Role-based access** - Uses AuthContext and user_type
+- ✅ **Unread indicators** - Red badges for unread notifications
+- ✅ **Mark as read** - One-click read marking
+- ✅ **Responsive design** - Works on mobile and desktop
+
+### Integration Steps
+1. Add NotificationBell to navbar: `<NotificationBell />`
+2. Routes already configured in App.jsx
+3. Sidebar navigation already includes notification links
+4. Uses existing AuthContext for user management
+
 ## Integration
 
 Add to main.py:
@@ -167,8 +207,4 @@ from modules.notifications import router as notifications_router
 app.include_router(notifications_router, prefix="/api/notifications", tags=["Notifications"])
 ```
 
-Run migration to create tables:
-```bash
-# Tables will be created automatically on first run
-# Or manually create using alembic
-```
+✅ **Status**: Fully integrated and working
