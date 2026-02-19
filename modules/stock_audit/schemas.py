@@ -38,6 +38,7 @@ class StockItemBase(BaseModel):
     generic_name: Optional[str] = None
     brand_name: Optional[str] = None
     batch_number: str
+    mrp: Optional[float] = None
     unit_price: Optional[float] = None
     expiry_date: Optional[date] = None
     manufacturer: Optional[str] = None

@@ -118,7 +118,7 @@ class ShopUpdate(BaseModel):
 
 class Shop(BaseModel):
     id: int
-    admin_id: int
+    organization_id: str
     shop_name: str
     shop_code: str
     address: Optional[str]

@@ -23,10 +23,10 @@ def get_current_user(user_dict: dict = Depends(get_user_dict), db: Session = Dep
     if not shop_code:
         raise HTTPException(status_code=400, detail="Shop code not found in token")
     
-    # Resolve shop_id from shop_code for the staff's admin
+    # Resolve shop_id from shop_code using organization_id
     shop = db.query(Shop).filter(
         Shop.shop_code == shop_code,
-        Shop.admin_id == staff.shop.admin_id
+        Shop.organization_id == staff.shop.organization_id
     ).first()
     if not shop:
         raise HTTPException(status_code=404, detail=f"Shop not found with code: {shop_code}")
@@ -754,7 +754,7 @@ def export_stock_items_excel(
     
     # Headers
     headers = ["ID", "Item Name", "Generic Name", "Brand Name", "Batch Number", "Rack", "Section", 
-               "Software Qty", "Physical Qty", "Discrepancy", "Unit Price", "Total Value", "Expiry Date", 
+               "Software Qty", "Physical Qty", "Discrepancy", "MRP", "Unit Price", "Total Value", "Expiry Date", 
                "Manufacturer", "Last Audit Date", "Created At"]
     
     for col, header in enumerate(headers, 1):
@@ -775,8 +775,9 @@ def export_stock_items_excel(
         ws.cell(row=row, column=8, value=item.quantity_software)
         ws.cell(row=row, column=9, value=item.quantity_physical)
         ws.cell(row=row, column=10, value=item.audit_discrepancy)
-        ws.cell(row=row, column=11, value=item.unit_price)
-        ws.cell(row=row, column=12, value=(item.quantity_software * item.unit_price) if item.unit_price else None)
+        ws.cell(row=row, column=11, value=item.mrp)
+        ws.cell(row=row, column=12, value=item.unit_price)
+        ws.cell(row=row, column=13, value=(item.quantity_software * item.unit_price) if item.unit_price else None)
         ws.cell(row=row, column=13, value=item.expiry_date.strftime("%Y-%m-%d") if item.expiry_date else "")
         ws.cell(row=row, column=14, value=item.manufacturer)
         ws.cell(row=row, column=15, value=item.last_audit_date.strftime("%Y-%m-%d %H:%M") if item.last_audit_date else "")

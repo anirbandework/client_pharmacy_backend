@@ -29,17 +29,15 @@ class Admin(Base):
     is_password_set = Column(Boolean, default=False)  # Track if user completed signup
     created_by_super_admin = Column(String, nullable=False)  # SuperAdmin name who created
     created_at = Column(DateTime, default=datetime.utcnow)
-    
-    shops = relationship("Shop", back_populates="admin")
 
 class Shop(Base):
     __tablename__ = "shops"
     __table_args__ = (
-        UniqueConstraint('shop_code', 'admin_id', name='unique_shop_code_per_admin'),
+        UniqueConstraint('shop_code', 'organization_id', name='unique_shop_code_per_organization'),
     )
     
     id = Column(Integer, primary_key=True, index=True)
-    admin_id = Column(Integer, ForeignKey("admins.id"), nullable=False)
+    organization_id = Column(String, nullable=False, index=True)
     
     shop_name = Column(String, nullable=False)
     shop_code = Column(String, index=True, nullable=False)
@@ -59,18 +57,7 @@ class Shop(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     
-    admin = relationship("Admin", back_populates="shops")
     staff = relationship("Staff", back_populates="shop", cascade="all, delete-orphan")
-    stock_racks = relationship("StockRack", cascade="all, delete-orphan")
-    stock_sections = relationship("StockSection", cascade="all, delete-orphan")
-    stock_items = relationship("StockItem", cascade="all, delete-orphan")
-    purchases = relationship("Purchase", cascade="all, delete-orphan")
-    purchase_items = relationship("PurchaseItem", cascade="all, delete-orphan")
-    sales = relationship("Sale", cascade="all, delete-orphan")
-    sale_items = relationship("SaleItem", cascade="all, delete-orphan")
-    audit_records = relationship("StockAuditRecord", cascade="all, delete-orphan")
-    audit_sessions = relationship("StockAuditSession", cascade="all, delete-orphan")
-    stock_adjustments = relationship("StockAdjustment", cascade="all, delete-orphan")
 
 class Staff(Base):
     __tablename__ = "staff"
@@ -113,6 +100,6 @@ class Staff(Base):
     shop = relationship("Shop", back_populates="staff")
     salary_records = relationship("SalaryRecord", back_populates="staff", cascade="all, delete-orphan")
     payment_info = relationship("StaffPaymentInfo", back_populates="staff", uselist=False, cascade="all, delete-orphan")
-    devices = relationship("StaffDevice", foreign_keys="[StaffDevice.staff_id]", back_populates="staff", cascade="all, delete-orphan")
-    attendance_records = relationship("AttendanceRecord", foreign_keys="[AttendanceRecord.staff_id]", back_populates="staff", cascade="all, delete-orphan")
-    leave_requests = relationship("LeaveRequest", foreign_keys="[LeaveRequest.staff_id]", back_populates="staff", cascade="all, delete-orphan")
+    devices = relationship("StaffDevice", back_populates="staff", cascade="all, delete-orphan")
+    attendance_records = relationship("AttendanceRecord", back_populates="staff", cascade="all, delete-orphan")
+    leave_requests = relationship("LeaveRequest", back_populates="staff", cascade="all, delete-orphan")

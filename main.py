@@ -9,19 +9,22 @@ load_dotenv()
 from modules.customer_tracking.routes import router as customer_router
 from modules.invoice_analyzer.routes import router as invoice_router
 from modules.stock_audit.routes import router as stock_router
-from modules.daily_records.routes import router as daily_records_router
 from modules.profit_analysis.routes import router as profit_router
 from modules.auth.routes import router as auth_router
 from modules.auth.salary_management.routes import router as salary_router
 from modules.auth.attendance.routes import router as attendance_router
 from modules.notifications.routes import router as notifications_router
 from modules.feedback.routes import router as feedback_router
+from modules.billing.routes import router as billing_router
+from modules.billing.daily_records_routes import router as billing_daily_records_router
+from modules.billing.analytics_routes import router as billing_analytics_router
 from modules.auth.middleware import ShopContextMiddleware
 from app.core.config import settings
 from app.database.database import engine, Base
-from modules.daily_records.models import DailyRecord, RecordModification
 from modules.customer_tracking.models import *
 from modules.stock_audit.models import *
+from modules.billing.models import Bill, BillItem
+from modules.billing.daily_records_models import DailyRecord as BillingDailyRecord, DailyExpense
 from modules.auth.models import Admin, Shop, Staff
 from modules.auth.otp.models import OTPVerification
 from modules.auth.salary_management.models import SalaryRecord, StaffPaymentInfo, SalaryAlert
@@ -78,7 +81,9 @@ app.include_router(feedback_router, prefix="/api/feedback", tags=["Feedback Syst
 app.include_router(customer_router, prefix="/api/customers", tags=["Customer Tracking"])
 app.include_router(invoice_router, prefix="/api/invoices", tags=["Purchase Invoice Analyzer"])
 app.include_router(stock_router, prefix="/api/stock-audit", tags=["Stock Audit"])
-app.include_router(daily_records_router, prefix="/api/daily-records", tags=["Daily Records"])
+app.include_router(billing_router, prefix="/api/billing", tags=["Billing System"])
+app.include_router(billing_daily_records_router, prefix="/api/billing", tags=["Daily Records"])
+app.include_router(billing_analytics_router, prefix="/api/billing", tags=["Analytics"])
 app.include_router(profit_router, prefix="/api/profit", tags=["Profit Analysis"])
 
 @app.get("/")
@@ -87,7 +92,7 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "modules": ["auth", "salary_management", "attendance", "notifications", "feedback", "customer_tracking", "invoice_analyzer", "stock_audit", "daily_records", "profit_analysis"]}
+    return {"status": "healthy", "modules": ["auth", "salary_management", "attendance", "notifications", "feedback", "customer_tracking", "invoice_analyzer", "stock_audit", "billing", "profit_analysis"]}
 
 @app.get("/modules")
 async def list_modules():
@@ -101,7 +106,7 @@ async def list_modules():
             "customer_tracking": "Regular customer tracking with reminders",
             "invoice_analyzer": "Purchase invoice tracking with AI-powered movement analysis, expiry alerts, and color-coded status monitoring",
             "stock_audit": "Random section auditing with discrepancy tracking",
-            "daily_records": "Robust daily business recording with modification tracking",
+            "billing": "Customer billing system with medicine search, stock integration, payment tracking (cash/online), and daily business records",
             "profit_analysis": "Bill-wise profit margin calculation"
         }
     }

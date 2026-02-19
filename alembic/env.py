@@ -10,6 +10,8 @@ from modules.auth.salary_management.models import SalaryRecord, StaffPaymentInfo
 from modules.auth.attendance.models import ShopWiFi, StaffDevice, AttendanceRecord, AttendanceSettings, LeaveRequest
 from modules.notifications.models import Notification, NotificationShopTarget, NotificationStaffTarget, NotificationRead
 from modules.stock_audit.models import StockRack, StockSection, StockItem, Purchase, PurchaseItem, Sale, SaleItem, StockAuditRecord, StockAuditSession, StockAdjustment
+from modules.billing.models import Bill, BillItem
+from modules.billing.daily_records_models import DailyRecord as BillingDailyRecord, DailyExpense
 
 config = context.config
 if config.config_file_name is not None:

@@ -121,9 +121,9 @@ class AuthService:
     
     # Shop Management
     @staticmethod
-    def create_shop(db: Session, admin_id: int, shop_data: schemas.ShopCreate, admin_name: str) -> models.Shop:
+    def create_shop(db: Session, organization_id: str, shop_data: schemas.ShopCreate, admin_name: str) -> models.Shop:
         db_shop = models.Shop(
-            admin_id=admin_id,
+            organization_id=organization_id,
             created_by_admin=admin_name,
             **shop_data.model_dump()
         )
@@ -140,15 +140,11 @@ class AuthService:
     @staticmethod
     def get_organization_shops(db: Session, organization_id: str):
         """Get all shops for admins with same organization_id"""
-        admin_ids = db.query(models.Admin.id).filter(
-            models.Admin.organization_id == organization_id
-        ).all()
-        admin_ids = [aid[0] for aid in admin_ids]
-        return db.query(models.Shop).filter(models.Shop.admin_id.in_(admin_ids)).all()
+        return db.query(models.Shop).filter(models.Shop.organization_id == organization_id).all()
     
     @staticmethod
-    def get_admin_shops(db: Session, admin_id: int):
-        return db.query(models.Shop).filter(models.Shop.admin_id == admin_id).all()
+    def get_admin_shops(db: Session, organization_id: str):
+        return db.query(models.Shop).filter(models.Shop.organization_id == organization_id).all()
     
     # Staff Management
     @staticmethod
@@ -174,11 +170,7 @@ class AuthService:
     @staticmethod
     def get_organization_staff(db: Session, organization_id: str):
         """Get all staff for admins with same organization_id"""
-        admin_ids = db.query(models.Admin.id).filter(
-            models.Admin.organization_id == organization_id
-        ).all()
-        admin_ids = [aid[0] for aid in admin_ids]
-        shop_ids = db.query(models.Shop.id).filter(models.Shop.admin_id.in_(admin_ids)).all()
+        shop_ids = db.query(models.Shop.id).filter(models.Shop.organization_id == organization_id).all()
         shop_ids = [sid[0] for sid in shop_ids]
         return db.query(models.Staff).filter(models.Staff.shop_id.in_(shop_ids)).all()
     

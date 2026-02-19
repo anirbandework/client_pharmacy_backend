@@ -163,8 +163,7 @@ def delete_admin(
     
     if len(org_admins) == 1:
         # Last admin - delete all shops and staff in organization
-        admin_ids = [a.id for a in org_admins]
-        shops = db.query(models.Shop).filter(models.Shop.admin_id.in_(admin_ids)).all()
+        shops = db.query(models.Shop).filter(models.Shop.organization_id == org_id).all()
         shop_count = len(shops)
         staff_count = 0
         
@@ -179,11 +178,8 @@ def delete_admin(
         for shop in shops:
             db.delete(shop)
         
-        # Expunge admin to prevent relationship updates
-        db.expunge(admin)
-        
-        # Delete admin using raw delete
-        db.query(models.Admin).filter(models.Admin.id == admin_id).delete()
+        # Delete admin
+        db.delete(admin)
         db.commit()
         
         return {
@@ -193,9 +189,8 @@ def delete_admin(
             "staff_deleted": staff_count
         }
     else:
-        # Other admins exist - expunge and delete
-        db.expunge(admin)
-        db.query(models.Admin).filter(models.Admin.id == admin_id).delete()
+        # Other admins exist - only delete this admin
+        db.delete(admin)
         db.commit()
         
         return {
@@ -229,11 +224,8 @@ def get_dashboard(
         # Get all admins in this organization
         org_admins = db.query(models.Admin).filter(models.Admin.organization_id == org_id).all()
         
-        # Get all admin IDs in this organization
-        admin_ids = [admin.id for admin in org_admins]
-        
-        # Get all shops for this organization (from any admin in org)
-        org_shops = db.query(models.Shop).filter(models.Shop.admin_id.in_(admin_ids)).all()
+        # Get all shops for this organization
+        org_shops = db.query(models.Shop).filter(models.Shop.organization_id == org_id).all()
         
         # Get all staff in organization shops
         shop_ids = [shop.id for shop in org_shops]
@@ -487,11 +479,14 @@ def create_shop(
     db: Session = Depends(get_db)
 ):
     """Create new shop"""
-    existing = db.query(models.Shop).filter(models.Shop.shop_code == shop_data.shop_code).first()
+    existing = db.query(models.Shop).filter(
+        models.Shop.shop_code == shop_data.shop_code,
+        models.Shop.organization_id == admin.organization_id
+    ).first()
     if existing:
-        raise HTTPException(status_code=400, detail="Shop code already exists")
+        raise HTTPException(status_code=400, detail="Shop code already exists in this organization")
     
-    shop = AuthService.create_shop(db, admin.id, shop_data, admin.full_name)
+    shop = AuthService.create_shop(db, admin.organization_id, shop_data, admin.full_name)
     return shop
 
 @router.get("/admin/shops", response_model=List[schemas.Shop])
@@ -519,7 +514,7 @@ def get_shop(
     """Get specific shop details"""
     shop = db.query(models.Shop).filter(
         models.Shop.id == shop_id,
-        models.Shop.admin_id == admin.id
+        models.Shop.organization_id == admin.organization_id
     ).first()
     if not shop:
         raise HTTPException(status_code=404, detail="Shop not found")
@@ -538,8 +533,7 @@ def update_shop(
         raise HTTPException(status_code=404, detail="Shop not found")
     
     # Check if shop belongs to same organization
-    shop_admin = db.query(models.Admin).filter(models.Admin.id == shop.admin_id).first()
-    if shop_admin.organization_id != admin.organization_id:
+    if shop.organization_id != admin.organization_id:
         raise HTTPException(status_code=403, detail="Cannot update shop from different organization")
     
     for key, value in shop_data.model_dump(exclude_unset=True).items():
@@ -564,8 +558,7 @@ def delete_shop(
         raise HTTPException(status_code=404, detail="Shop not found")
     
     # Check if shop belongs to same organization
-    shop_admin = db.query(models.Admin).filter(models.Admin.id == shop.admin_id).first()
-    if shop_admin.organization_id != admin.organization_id:
+    if shop.organization_id != admin.organization_id:
         raise HTTPException(status_code=403, detail="Cannot delete shop from different organization")
     
     # Delete all staff in the shop first
@@ -591,14 +584,12 @@ def create_staff_by_code(
     db: Session = Depends(get_db)
 ):
     """Create staff for shop by shop_code"""
-    shop = db.query(models.Shop).filter(models.Shop.shop_code == shop_code).first()
+    shop = db.query(models.Shop).filter(
+        models.Shop.shop_code == shop_code,
+        models.Shop.organization_id == admin.organization_id
+    ).first()
     if not shop:
-        raise HTTPException(status_code=404, detail="Shop not found")
-    
-    # Check if shop belongs to same organization
-    shop_admin = db.query(models.Admin).filter(models.Admin.id == shop.admin_id).first()
-    if shop_admin.organization_id != admin.organization_id:
-        raise HTTPException(status_code=403, detail="Cannot create staff for shop from different organization")
+        raise HTTPException(status_code=404, detail="Shop not found in your organization")
     
     staff = AuthService.create_staff(db, shop.id, staff_data, admin.full_name)
     return staff
@@ -638,8 +629,7 @@ def update_staff(
     
     # Check if staff belongs to same organization
     shop = db.query(models.Shop).filter(models.Shop.id == staff.shop_id).first()
-    shop_admin = db.query(models.Admin).filter(models.Admin.id == shop.admin_id).first()
-    if shop_admin.organization_id != admin.organization_id:
+    if shop.organization_id != admin.organization_id:
         raise HTTPException(status_code=403, detail="Cannot update staff from different organization")
     
     update_data = staff_data.model_dump(exclude_unset=True)
@@ -673,8 +663,7 @@ def delete_staff(
     
     # Check if staff belongs to same organization
     shop = db.query(models.Shop).filter(models.Shop.id == staff.shop_id).first()
-    shop_admin = db.query(models.Admin).filter(models.Admin.id == shop.admin_id).first()
-    if shop_admin.organization_id != admin.organization_id:
+    if shop.organization_id != admin.organization_id:
         raise HTTPException(status_code=403, detail="Cannot delete staff from different organization")
     
     db.delete(staff)

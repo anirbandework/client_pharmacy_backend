@@ -25,10 +25,10 @@ def get_current_user(user_dict: dict, db: Session) -> tuple[Staff, int]:
     staff = user_dict["user"]
     shop_code = user_dict["token_data"].shop_code
     
-    # 3. Resolve shop_id from shop_code
+    # 3. Resolve shop_id from shop_code using organization_id
     shop = db.query(Shop).filter(
         Shop.shop_code == shop_code,
-        Shop.admin_id == staff.shop.admin_id
+        Shop.organization_id == staff.shop.organization_id
     ).first()
     
     # 4. Return staff and shop_id for use in all endpoints
@@ -37,7 +37,7 @@ def get_current_user(user_dict: dict, db: Session) -> tuple[Staff, int]:
 
 **Key Points:**
 - Extracts `shop_code` from JWT token
-- Resolves to `shop_id` (database ID)
+- Resolves to `shop_id` (database ID) using organization_id
 - Returns tuple: `(staff_object, shop_id)`
 - Used as dependency in ALL endpoints
 

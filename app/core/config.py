@@ -3,7 +3,7 @@ from typing import Optional
 import os
 
 class Settings(BaseSettings):
-    database_url: str = os.getenv("DATABASE_URL", "sqlite:///./pharmacy.db")
+    database_url: str = os.getenv("DATABASE_URL", "sqlite:///./app/database/pharmacy.db")
     redis_url: str = os.getenv("REDIS_URL", "redis://localhost:6379")
     
     # Twilio SMS Configuration

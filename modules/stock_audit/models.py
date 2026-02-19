@@ -41,6 +41,7 @@ class StockItem(Base):
     quantity_software = Column(Integer, default=0)
     quantity_physical = Column(Integer, nullable=True)
     
+    mrp = Column(Float, nullable=True)
     unit_price = Column(Float, nullable=True)
     expiry_date = Column(Date, nullable=True)
     manufacturer = Column(String, nullable=True)
