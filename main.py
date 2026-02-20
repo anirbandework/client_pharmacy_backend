@@ -19,6 +19,7 @@ from modules.billing.routes import router as billing_router
 from modules.billing.daily_records_routes import router as billing_daily_records_router
 from modules.billing.analytics_routes import router as billing_analytics_router
 from modules.auth.middleware import ShopContextMiddleware
+from app.middleware.rate_limit import RateLimitMiddleware
 from app.core.config import settings
 from app.database.database import engine, Base
 from modules.customer_tracking.models import (
@@ -74,6 +75,9 @@ app.add_middleware(
 
 # Shop context middleware
 app.add_middleware(ShopContextMiddleware)
+
+# Rate limiting middleware
+app.add_middleware(RateLimitMiddleware)
 
 # Module routes
 app.include_router(auth_router, prefix="/api/auth", tags=["Authentication"])

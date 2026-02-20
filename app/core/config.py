@@ -6,6 +6,12 @@ class Settings(BaseSettings):
     database_url: str = os.getenv("DATABASE_URL", "postgresql://pharmacy_user:pharmacy_pass@localhost:5432/pharmacy_db")
     redis_url: str = os.getenv("REDIS_URL", "redis://localhost:6379")
     
+    # Redis Configuration
+    redis_max_connections: int = int(os.getenv("REDIS_MAX_CONNECTIONS", "100"))
+    redis_retry_on_timeout: bool = True
+    redis_socket_keepalive: bool = True
+    redis_socket_keepalive_options: dict = {}
+    
     # Twilio SMS Configuration
     twilio_account_sid: str = os.getenv("TWILIO_ACCOUNT_SID", "")
     twilio_auth_token: str = os.getenv("TWILIO_AUTH_TOKEN", "")
