@@ -8,7 +8,7 @@ celery_app = Celery(
     include=['app.services.whatsapp_service', 'app.services.reminder_service']
 )
 
-# Celery configuration for high-load scenarios and
+# Celery configuration for high-load scenarios and this
 celery_app.conf.update(
     task_serializer='json',
     accept_content=['json'],
