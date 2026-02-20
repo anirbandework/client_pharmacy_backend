@@ -35,10 +35,10 @@ MANIFEST
 .env.production
 
 # Database
-# *.db
+*.db
 *.sqlite
 *.sqlite3
-# pharmacy.db
+pharmacy.db
 
 # IDE
 .vscode/

@@ -20,10 +20,14 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade schema."""
-    # SQLite doesn't support ALTER FOREIGN KEY, so we need to recreate tables
+    # Drop dependent table first
+    op.drop_table('record_modifications')
     
-    # Create new daily_records table with CASCADE delete
-    op.create_table('daily_records_new',
+    # Drop and recreate daily_records with CASCADE
+    op.drop_table('daily_records')
+    
+    # Create daily_records table with CASCADE delete
+    op.create_table('daily_records',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('shop_id', sa.Integer(), nullable=False),
     sa.Column('date', sa.Date(), nullable=True),
@@ -50,21 +54,12 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['shop_id'], ['shops.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id')
     )
-    
-    # Copy data from old table
-    op.execute('INSERT INTO daily_records_new SELECT * FROM daily_records')
-    
-    # Drop old table and rename new one
-    op.drop_table('daily_records')
-    op.rename_table('daily_records_new', 'daily_records')
-    
-    # Recreate indexes
     op.create_index(op.f('ix_daily_records_date'), 'daily_records', ['date'], unique=False)
     op.create_index(op.f('ix_daily_records_id'), 'daily_records', ['id'], unique=False)
     op.create_index(op.f('ix_daily_records_shop_id'), 'daily_records', ['shop_id'], unique=False)
     
-    # Create new record_modifications table with CASCADE delete
-    op.create_table('record_modifications_new',
+    # Create record_modifications table with CASCADE delete
+    op.create_table('record_modifications',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('shop_id', sa.Integer(), nullable=False),
     sa.Column('daily_record_id', sa.Integer(), nullable=True),
@@ -78,15 +73,6 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['shop_id'], ['shops.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id')
     )
-    
-    # Copy data from old table
-    op.execute('INSERT INTO record_modifications_new SELECT * FROM record_modifications')
-    
-    # Drop old table and rename new one
-    op.drop_table('record_modifications')
-    op.rename_table('record_modifications_new', 'record_modifications')
-    
-    # Recreate indexes
     op.create_index(op.f('ix_record_modifications_daily_record_id'), 'record_modifications', ['daily_record_id'], unique=False)
     op.create_index(op.f('ix_record_modifications_id'), 'record_modifications', ['id'], unique=False)
     op.create_index(op.f('ix_record_modifications_shop_id'), 'record_modifications', ['shop_id'], unique=False)

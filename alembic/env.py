@@ -2,6 +2,7 @@ from logging.config import fileConfig
 from sqlalchemy import engine_from_config, pool
 from alembic import context
 from app.database.database import Base
+import os
 
 # Import all models
 from modules.auth.models import SuperAdmin, Admin, Shop, Staff
@@ -16,6 +17,14 @@ from modules.billing.daily_records_models import DailyRecord as BillingDailyReco
 config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
+
+# Override sqlalchemy.url with DATABASE_URL from environment (for Railway)
+if os.getenv("DATABASE_URL"):
+    database_url = os.getenv("DATABASE_URL")
+    # Fix Railway's postgres:// to postgresql://
+    if database_url.startswith("postgres://"):
+        database_url = database_url.replace("postgres://", "postgresql://", 1)
+    config.set_main_option("sqlalchemy.url", database_url)
 
 target_metadata = Base.metadata
 
