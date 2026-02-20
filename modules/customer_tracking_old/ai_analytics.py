@@ -2,7 +2,7 @@
 
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
-from modules.customer_tracking.models import *
+from modules.customer_tracking_old.models import *
 from datetime import datetime, timedelta, date
 from typing import Dict, Any, List
 import os

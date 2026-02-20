@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Text, Enum
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Text, Enum, Boolean
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.database.database import Base
@@ -23,6 +23,11 @@ class Bill(Base):
     customer_phone = Column(String, nullable=True, index=True)
     customer_email = Column(String, nullable=True)
     doctor_name = Column(String, nullable=True)
+    
+    # Customer tracking
+    customer_category = Column(String, nullable=True)  # contact_sheet, first_time_prescription, regular_branded, generic_informed
+    was_contacted_before = Column(Boolean, default=False)  # Did staff contact them before?
+    visited_but_no_purchase = Column(Boolean, default=False)  # Mark as yellow
     
     # Payment details
     payment_method = Column(Enum(PaymentMethod), nullable=False)

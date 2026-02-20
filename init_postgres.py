@@ -13,7 +13,7 @@ from modules.notifications.models import Notification, NotificationShopTarget, N
 from modules.stock_audit.models import StockRack, StockSection, StockItem, Purchase, PurchaseItem, Sale, SaleItem, StockAuditRecord, StockAuditSession, StockAdjustment
 from modules.billing.models import Bill, BillItem
 from modules.billing.daily_records_models import DailyRecord as BillingDailyRecord, DailyExpense
-from modules.customer_tracking.models import *
+from modules.customer_tracking_old.models import *
 from modules.invoice_analyzer.models import *
 from modules.feedback.models import Feedback
 

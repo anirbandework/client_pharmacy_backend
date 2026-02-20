@@ -41,6 +41,8 @@ class BillCreate(BaseModel):
     customer_phone: Optional[str] = None
     customer_email: Optional[str] = None
     doctor_name: Optional[str] = None
+    customer_category: Optional[str] = None  # contact_sheet, first_time_prescription, regular_branded, generic_informed
+    was_contacted_before: bool = False
     payment_method: PaymentMethod
     payment_reference: Optional[str] = None
     discount_amount: float = 0.0

@@ -21,7 +21,10 @@ from modules.billing.analytics_routes import router as billing_analytics_router
 from modules.auth.middleware import ShopContextMiddleware
 from app.core.config import settings
 from app.database.database import engine, Base
-from modules.customer_tracking.models import *
+from modules.customer_tracking.models import (
+    ContactRecord, ContactInteraction, ContactReminder,
+    Customer, CustomerPurchase, RefillReminder
+)
 from modules.stock_audit.models import *
 from modules.billing.models import Bill, BillItem
 from modules.billing.daily_records_models import DailyRecord as BillingDailyRecord, DailyExpense
@@ -78,7 +81,7 @@ app.include_router(salary_router, prefix="/api/salary", tags=["Salary Management
 app.include_router(attendance_router, prefix="/api/attendance", tags=["Attendance System"])
 app.include_router(notifications_router, prefix="/api/notifications", tags=["Notifications"])
 app.include_router(feedback_router, prefix="/api/feedback", tags=["Feedback System"])
-app.include_router(customer_router, prefix="/api/customers", tags=["Customer Tracking"])
+app.include_router(customer_router, prefix="/api/customer-tracking", tags=["Customer Tracking"])
 app.include_router(invoice_router, prefix="/api/invoices", tags=["Purchase Invoice Analyzer"])
 app.include_router(stock_router, prefix="/api/stock-audit", tags=["Stock Audit"])
 app.include_router(billing_router, prefix="/api/billing", tags=["Billing System"])

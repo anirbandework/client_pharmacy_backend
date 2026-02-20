@@ -2,6 +2,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, or_
 from .models import Bill, BillItem
 from modules.stock_audit.models import StockItem, StockSection, StockRack
+from modules.customer_tracking.services import CustomerTrackingService
+from modules.customer_tracking.models import Customer
 from datetime import datetime, date, timedelta
 from typing import List, Dict, Any, Optional
 import random
@@ -130,6 +132,8 @@ class BillingService:
             customer_phone=bill_data.get('customer_phone'),
             customer_email=bill_data.get('customer_email'),
             doctor_name=bill_data.get('doctor_name'),
+            customer_category=bill_data.get('customer_category'),
+            was_contacted_before=bill_data.get('was_contacted_before', False),
             payment_method=bill_data['payment_method'],
             payment_reference=bill_data.get('payment_reference'),
             subtotal=subtotal,
@@ -143,6 +147,20 @@ class BillingService:
         )
         db.add(bill)
         db.flush()
+        
+        # Handle customer tracking
+        if bill_data.get('customer_phone'):
+            phone = bill_data['customer_phone']
+            category = bill_data.get('customer_category', 'first_time_prescription')
+            
+            # Get or create customer
+            customer = CustomerTrackingService.get_or_create_customer(
+                db, shop_id, phone, bill_data.get('customer_name'), category
+            )
+            
+            # Mark contact as converted if from contact sheet
+            if bill_data.get('was_contacted_before'):
+                CustomerTrackingService.mark_contact_converted(db, phone, shop_id, total_amount)
         
         # Create bill items and update stock
         for item_data in items_data:
