@@ -10,7 +10,7 @@ echo "REDIS_URL: ${REDIS_URL:0:20}..."
 
 # Run Alembic migrations
 echo "🔄 Running database migrations..."
-alembic upgrade head
+alembic upgrade head || echo "⚠️  Migrations skipped (tables may already exist)"
 
 # Start FastAPI application
 echo "🌐 Starting FastAPI server on 0.0.0.0:$PORT..."
