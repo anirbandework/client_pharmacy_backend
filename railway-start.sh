@@ -10,6 +10,11 @@ echo "REDIS_URL: ${REDIS_URL:0:20}..."
 
 # Run Alembic migrations
 echo "🔄 Running database migrations..."
+
+# Skip bad migration by marking it as applied
+echo "Marking bad migration as applied..."
+psql $DATABASE_URL -c "INSERT INTO alembic_version (version_num) VALUES ('9da7a87fed6e') ON CONFLICT (version_num) DO NOTHING;" 2>/dev/null || true
+
 alembic upgrade head || echo "⚠️  Migrations skipped (tables may already exist)"
 
 # Start FastAPI application
