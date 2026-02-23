@@ -1,431 +1,459 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from sqlalchemy.orm import Session
-from typing import List, Optional
-from datetime import date, datetime
-
+from sqlalchemy import func
 from app.database.database import get_db
-from .models import PurchaseInvoice, PurchaseInvoiceItem, ExpiryAlert, MonthlyInvoiceSummary
-from .schemas import (
-    PurchaseInvoiceCreate, PurchaseInvoiceResponse, ItemSaleCreate, ItemSaleResponse,
-    ExpiryAlertResponse, MonthlyInvoiceSummaryResponse, InvoiceAnalytics,
-    MovementAnalytics, AIInsights, DashboardSummary
-)
-from .service import PurchaseInvoiceService
-from .ai_analytics import PurchaseInvoiceAIAnalytics
-from .wings_integration import WINGSIntegrationService
+from modules.auth.dependencies import get_current_user as get_user_dict
+from modules.auth.models import Staff, Shop
+from typing import List, Optional
+from datetime import datetime, date
+import os
+import shutil
+from . import models, schemas
+from .ai_extractor import AIInvoiceExtractor
 
 router = APIRouter()
-ai_analytics = PurchaseInvoiceAIAnalytics()
 
-# Purchase Invoice Management
-@router.post("/", response_model=PurchaseInvoiceResponse)
-async def create_purchase_invoice(
-    invoice_data: PurchaseInvoiceCreate,
-    db: Session = Depends(get_db),
-    shop_id: Optional[int] = Query(None)
-):
-    """Create a new purchase invoice with automatic calculations and expiry tracking"""
-    try:
-        invoice = PurchaseInvoiceService.create_invoice(db, invoice_data, shop_id)
-        return invoice
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+# Upload directory
+UPLOAD_DIR = "uploads/invoices"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-@router.get("/monthly/{year}/{month}", response_model=List[PurchaseInvoiceResponse])
-async def get_monthly_invoices(
-    year: int,
-    month: int,
-    db: Session = Depends(get_db),
-    shop_id: Optional[int] = Query(None)
-):
-    """Get all purchase invoices for a specific month with color coding"""
-    invoices = PurchaseInvoiceService.get_monthly_invoices(db, year, month, shop_id)
-    return invoices
-
-# Dashboard - Must come before /{invoice_id} to avoid path conflict
-@router.get("/dashboard", response_model=DashboardSummary)
-async def get_dashboard_summary(
-    db: Session = Depends(get_db),
-    shop_id: Optional[int] = Query(None)
-):
-    """Get dashboard summary with current month data, alerts, and AI insights"""
+def get_current_user(user_dict: dict = Depends(get_user_dict), db: Session = Depends(get_db)) -> tuple[Staff, int]:
+    """Extract staff user and resolve shop_id from shop_code"""
+    if user_dict["token_data"].user_type != "staff":
+        raise HTTPException(status_code=403, detail="Staff access required")
     
-    current_date = date.today()
+    staff = user_dict["user"]
+    shop_code = user_dict["token_data"].shop_code
     
-    # Get current month summary
-    current_summary = db.query(MonthlyInvoiceSummary).filter(
-        MonthlyInvoiceSummary.year == current_date.year,
-        MonthlyInvoiceSummary.month == current_date.month,
-        MonthlyInvoiceSummary.shop_id == shop_id
+    if not shop_code:
+        raise HTTPException(status_code=400, detail="Shop code not found in token")
+    
+    shop = db.query(Shop).filter(
+        Shop.shop_code == shop_code,
+        Shop.organization_id == staff.shop.organization_id
     ).first()
     
-    if not current_summary:
-        # Create empty summary if none exists
-        current_summary = MonthlyInvoiceSummary(
-            year=current_date.year,
-            month=current_date.month,
-            shop_id=shop_id,
-            total_invoices=0,
-            total_amount=0.0,
-            total_items=0,
-            green_invoices=0,
-            yellow_invoices=0,
-            red_invoices=0,
-            month_color="red",
-            overall_sold_percentage=0.0,
-            expiring_items_count=0,
-            expired_items_count=0
+    if not shop:
+        raise HTTPException(status_code=404, detail=f"Shop not found with code: {shop_code}")
+    
+    return staff, shop.id
+
+@router.post("/upload", response_model=schemas.PurchaseInvoiceResponse)
+async def upload_invoice_pdf(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: tuple = Depends(get_current_user)
+):
+    """Upload and process purchase invoice PDF"""
+    staff, shop_id = current_user
+    
+    # Validate file type
+    if not file.filename.endswith('.pdf'):
+        raise HTTPException(status_code=400, detail="Only PDF files are allowed")
+    
+    # Save PDF file temporarily
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"{shop_id}_{timestamp}_{file.filename}"
+    file_path = os.path.join(UPLOAD_DIR, filename)
+    
+    try:
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
+    
+    # Extract text from PDF
+    try:
+        extractor = AIInvoiceExtractor()
+        parsed_data = extractor.extract_from_pdf(file_path)
+    except Exception as e:
+        os.remove(file_path)
+        raise HTTPException(status_code=400, detail=f"Failed to parse PDF: {str(e)}")
+    
+    # Check for duplicate invoice
+    invoice_number = parsed_data.get("invoice_number", "UNKNOWN")
+    supplier_name = parsed_data.get("supplier_name", "Unknown Supplier")
+    net_amount = parsed_data.get("net_amount", 0.0)
+    
+    existing_invoice = db.query(models.PurchaseInvoice).filter(
+        models.PurchaseInvoice.shop_id == shop_id,
+        models.PurchaseInvoice.invoice_number == invoice_number,
+        models.PurchaseInvoice.supplier_name == supplier_name,
+        models.PurchaseInvoice.net_amount == net_amount
+    ).first()
+    
+    if existing_invoice:
+        os.remove(file_path)
+        raise HTTPException(
+            status_code=409,
+            detail=f"Duplicate invoice detected! Invoice '{invoice_number}' from '{supplier_name}' with amount ₹{net_amount:.2f} already exists."
         )
     
-    # Get pending alerts (limit to 10)
-    alerts = PurchaseInvoiceService.get_expiry_alerts(db, 45, shop_id)[:10]
-    formatted_alerts = []
-    for alert in alerts:
-        item = db.query(PurchaseInvoiceItem).filter(PurchaseInvoiceItem.id == alert.item_id).first()
-        if item:
-            formatted_alerts.append(ExpiryAlertResponse(
-                id=alert.id,
-                alert_type=alert.alert_type,
-                alert_date=alert.alert_date,
-                message=alert.message,
-                priority=alert.priority,
-                is_acknowledged=alert.is_acknowledged,
-                item_code=item.item_code,
-                item_name=item.item_name,
-                days_to_expiry=item.days_to_expiry
-            ))
+    # Parse dates
+    def parse_date(date_str):
+        if not date_str:
+            return None
+        try:
+            return datetime.strptime(date_str, "%d/%m/%Y")
+        except:
+            return None
     
-    # Get recent invoices (last 5)
-    recent_invoices = db.query(PurchaseInvoice).filter(
-        PurchaseInvoice.shop_id == shop_id if shop_id else True
-    ).order_by(PurchaseInvoice.created_at.desc()).limit(5).all()
-    
-    # Get movement analytics (top 10 items)
-    movement_analytics = []
-    top_items = db.query(PurchaseInvoiceItem).join(PurchaseInvoice).filter(
-        PurchaseInvoice.shop_id == shop_id if shop_id else True
-    ).order_by(PurchaseInvoiceItem.movement_rate.desc()).limit(10).all()
-    
-    for item in top_items:
-        days_in_stock = (date.today() - item.invoice.received_date).days or 1
-        predicted_sellout = None
-        if item.movement_rate > 0 and item.remaining_quantity > 0:
-            predicted_sellout = int(item.remaining_quantity / item.movement_rate)
-        
-        movement_analytics.append(MovementAnalytics(
-            item_code=item.item_code,
-            item_name=item.item_name,
-            total_purchased=item.purchased_quantity,
-            total_sold=item.sold_quantity,
-            movement_rate=item.movement_rate,
-            days_in_stock=days_in_stock,
-            predicted_sellout_days=predicted_sellout,
-            demand_category=item.demand_category,
-            seasonal_factor=item.seasonal_factor
-        ))
-    
-    # Get AI insights
-    ai_insights = ai_analytics.get_comprehensive_analysis(db, shop_id)
-    
-    return DashboardSummary(
-        current_month_summary=current_summary,
-        pending_alerts=formatted_alerts,
-        recent_invoices=recent_invoices,
-        movement_analytics=movement_analytics,
-        ai_insights=ai_insights
+    # Create invoice record
+    invoice = models.PurchaseInvoice(
+        shop_id=shop_id,
+        staff_id=staff.id,
+        staff_name=staff.name,
+        invoice_number=invoice_number,
+        invoice_date=parse_date(parsed_data.get("invoice_date")) or datetime.now(),
+        due_date=parse_date(parsed_data.get("due_date")),
+        supplier_name=supplier_name,
+        supplier_address=parsed_data.get("supplier_address"),
+        supplier_gstin=parsed_data.get("supplier_gstin"),
+        supplier_dl_numbers=parsed_data.get("supplier_dl_numbers"),
+        supplier_phone=parsed_data.get("supplier_phone"),
+        gross_amount=parsed_data.get("gross_amount", 0.0),
+        discount_amount=parsed_data.get("discount_amount", 0.0),
+        taxable_amount=parsed_data.get("taxable_amount", 0.0),
+        total_gst=parsed_data.get("total_gst", 0.0),
+        round_off=parsed_data.get("round_off", 0.0),
+        net_amount=net_amount,
+        pdf_filename=filename,
+        pdf_path=file_path,
+        raw_extracted_data=parsed_data
     )
-
-@router.get("/{invoice_id}", response_model=PurchaseInvoiceResponse)
-async def get_invoice(
-    invoice_id: int,
-    db: Session = Depends(get_db)
-):
-    """Get specific invoice details"""
-    invoice = db.query(PurchaseInvoice).filter(PurchaseInvoice.id == invoice_id).first()
-    if not invoice:
-        raise HTTPException(status_code=404, detail="Invoice not found")
-    return invoice
-
-# Sales Recording
-@router.post("/sales", response_model=ItemSaleResponse)
-async def record_item_sale(
-    sale_data: ItemSaleCreate,
-    db: Session = Depends(get_db)
-):
-    """Record a sale and update item quantities and invoice status"""
-    try:
-        sale = PurchaseInvoiceService.record_sale(db, sale_data)
-        return sale
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-# Expiry Management
-@router.get("/expiry/alerts", response_model=List[ExpiryAlertResponse])
-async def get_expiry_alerts(
-    days_ahead: int = Query(45, description="Days ahead to check for expiry"),
-    db: Session = Depends(get_db),
-    shop_id: Optional[int] = Query(None)
-):
-    """Get pending expiry alerts"""
-    alerts = PurchaseInvoiceService.get_expiry_alerts(db, days_ahead, shop_id)
     
-    # Format response
-    formatted_alerts = []
-    for alert in alerts:
-        item = db.query(PurchaseInvoiceItem).filter(PurchaseInvoiceItem.id == alert.item_id).first()
-        if item:
-            formatted_alerts.append(ExpiryAlertResponse(
-                id=alert.id,
-                alert_type=alert.alert_type,
-                alert_date=alert.alert_date,
-                message=alert.message,
-                priority=alert.priority,
-                is_acknowledged=alert.is_acknowledged,
-                item_code=item.item_code,
-                item_name=item.item_name,
-                days_to_expiry=item.days_to_expiry
-            ))
+    db.add(invoice)
+    db.flush()
     
-    return formatted_alerts
-
-@router.put("/expiry/alerts/{alert_id}/acknowledge")
-async def acknowledge_expiry_alert(
-    alert_id: int,
-    acknowledged_by: str,
-    db: Session = Depends(get_db)
-):
-    """Acknowledge an expiry alert"""
-    alert = db.query(ExpiryAlert).filter(ExpiryAlert.id == alert_id).first()
-    if not alert:
-        raise HTTPException(status_code=404, detail="Alert not found")
-    
-    alert.is_acknowledged = True
-    alert.acknowledged_by = acknowledged_by
-    alert.acknowledged_at = datetime.utcnow()
+    # Create invoice items
+    for item_data in parsed_data.get("items", []):
+        # Parse expiry date
+        expiry_date = None
+        if item_data.get("expiry_date"):
+            try:
+                expiry_date = datetime.strptime(f"01/{item_data['expiry_date']}", "%d/%m/%Y")
+            except:
+                pass
+        
+        item = models.PurchaseInvoiceItem(
+            invoice_id=invoice.id,
+            shop_id=shop_id,
+            hsn_code=item_data.get("hsn_code"),
+            product_name=item_data.get("product_name", "Unknown Product"),
+            batch_number=item_data.get("batch_number"),
+            expiry_date=expiry_date,
+            quantity=item_data.get("quantity", 1),
+            free_quantity=item_data.get("free_quantity", 0.0),
+            unit_price=item_data.get("unit_price", 0.0),
+            discount_percent=item_data.get("discount_percent", 0.0),
+            discount_amount=item_data.get("discount_amount", 0.0),
+            taxable_amount=item_data.get("taxable_amount", 0.0),
+            cgst_percent=item_data.get("cgst_percent", 0.0),
+            cgst_amount=item_data.get("cgst_amount", 0.0),
+            sgst_percent=item_data.get("sgst_percent", 0.0),
+            sgst_amount=item_data.get("sgst_amount", 0.0),
+            igst_percent=item_data.get("igst_percent", 0.0),
+            igst_amount=item_data.get("igst_amount", 0.0),
+            total_amount=item_data.get("total_amount", 0.0)
+        )
+        db.add(item)
     
     db.commit()
-    return {"message": "Alert acknowledged successfully"}
-
-# Analytics
-@router.get("/analytics/{year}/{month}", response_model=InvoiceAnalytics)
-async def get_monthly_analytics(
-    year: int,
-    month: int,
-    db: Session = Depends(get_db),
-    shop_id: Optional[int] = Query(None)
-):
-    """Get comprehensive analytics for a specific month"""
-    analytics = PurchaseInvoiceService.get_analytics(db, year, month, shop_id)
-    return analytics
-
-@router.get("/analytics/monthly-summary/{year}/{month}", response_model=MonthlyInvoiceSummaryResponse)
-async def get_monthly_summary(
-    year: int,
-    month: int,
-    db: Session = Depends(get_db),
-    shop_id: Optional[int] = Query(None)
-):
-    """Get monthly summary with color coding"""
-    summary = db.query(MonthlyInvoiceSummary).filter(
-        MonthlyInvoiceSummary.year == year,
-        MonthlyInvoiceSummary.month == month,
-        MonthlyInvoiceSummary.shop_id == shop_id
-    ).first()
+    db.refresh(invoice)
     
-    if not summary:
-        raise HTTPException(status_code=404, detail="Monthly summary not found")
+    return invoice
+
+@router.get("/", response_model=List[schemas.PurchaseInvoiceListResponse])
+def get_invoices(
+    skip: int = 0,
+    limit: int = 100,
+    supplier_name: Optional[str] = None,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    db: Session = Depends(get_db),
+    current_user: tuple = Depends(get_current_user)
+):
+    """Get all purchase invoices for the shop"""
+    staff, shop_id = current_user
     
-    return summary
-
-# AI Analytics
-@router.get("/ai-analytics/comprehensive", response_model=AIInsights)
-async def get_comprehensive_ai_analysis(
-    db: Session = Depends(get_db),
-    shop_id: Optional[int] = Query(None)
-):
-    """Get comprehensive AI analysis of purchase invoices and movement patterns"""
-    insights = ai_analytics.get_comprehensive_analysis(db, shop_id)
-    return insights
-
-@router.get("/ai-analytics/item-movement/{item_code}")
-async def analyze_item_movement(
-    item_code: str,
-    db: Session = Depends(get_db),
-    shop_id: Optional[int] = Query(None)
-):
-    """Analyze specific item movement using 5 parameters for AI learning"""
-    analysis = ai_analytics.analyze_item_movement_5_parameters(db, item_code, shop_id)
-    return analysis
-
-@router.get("/ai-analytics/stock-predictions")
-async def get_stock_predictions(
-    months_ahead: int = Query(3, description="Number of months to predict ahead"),
-    db: Session = Depends(get_db),
-    shop_id: Optional[int] = Query(None)
-):
-    """Get AI-powered stock requirement predictions"""
-    predictions = ai_analytics.predict_stock_requirements(db, months_ahead, shop_id)
-    return predictions
-
-
-
-# WINGS Integration
-@router.post("/wings/import-purchase")
-async def import_purchase_from_wings(
-    wings_data: dict,
-    db: Session = Depends(get_db),
-    shop_id: Optional[int] = Query(None)
-):
-    """Import purchase invoice from WINGS POS system"""
+    query = db.query(models.PurchaseInvoice).filter(
+        models.PurchaseInvoice.shop_id == shop_id
+    )
     
-    # Validate WINGS data
-    validation = WINGSIntegrationService.validate_wings_purchase_data(wings_data)
-    if not validation["valid"]:
-        raise HTTPException(status_code=400, detail={
-            "message": "Invalid WINGS data format",
-            "errors": validation["errors"]
+    if supplier_name:
+        query = query.filter(models.PurchaseInvoice.supplier_name.ilike(f"%{supplier_name}%"))
+    
+    if start_date:
+        query = query.filter(models.PurchaseInvoice.invoice_date >= start_date)
+    
+    if end_date:
+        query = query.filter(models.PurchaseInvoice.invoice_date <= end_date)
+    
+    invoices = query.order_by(models.PurchaseInvoice.invoice_date.desc()).offset(skip).limit(limit).all()
+    
+    # Add item count and verified_by_name
+    result = []
+    for inv in invoices:
+        verified_by_name = None
+        if inv.verified_by:
+            verifier = db.query(Staff).filter(Staff.id == inv.verified_by).first()
+            if verifier:
+                verified_by_name = verifier.name
+        
+        result.append({
+            "id": inv.id,
+            "invoice_number": inv.invoice_number,
+            "invoice_date": inv.invoice_date,
+            "supplier_name": inv.supplier_name,
+            "net_amount": inv.net_amount,
+            "total_items": len(inv.items),
+            "is_verified": inv.is_verified,
+            "verified_by_name": verified_by_name,
+            "created_at": inv.created_at
         })
     
-    try:
-        invoice = WINGSIntegrationService.import_purchase_invoice_from_wings(db, wings_data, shop_id)
-        return {
-            "message": "Purchase invoice imported successfully from WINGS",
-            "invoice_id": invoice.id,
-            "invoice_number": invoice.invoice_number
-        }
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    return result
 
-@router.post("/wings/import-sales")
-async def import_sales_from_wings(
-    wings_sales_data: List[dict],
-    db: Session = Depends(get_db)
-):
-    """Import sales data from WINGS POS system"""
-    
-    # Validate WINGS sales data
-    validation = WINGSIntegrationService.validate_wings_sales_data(wings_sales_data)
-    if not validation["valid"]:
-        raise HTTPException(status_code=400, detail={
-            "message": "Invalid WINGS sales data format",
-            "errors": validation["errors"]
-        })
-    
-    try:
-        sales = WINGSIntegrationService.import_sales_from_wings(db, wings_sales_data)
-        return {
-            "message": "Sales data imported successfully from WINGS",
-            "sales_imported": len(sales)
-        }
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-@router.post("/wings/sync-live")
-async def sync_with_wings_live(
-    wings_api_endpoint: str,
-    shop_code: str,
-    db: Session = Depends(get_db)
-):
-    """Sync live data from WINGS POS system"""
-    
-    try:
-        result = WINGSIntegrationService.sync_with_wings_live(db, wings_api_endpoint, shop_code)
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.get("/ai-analytics/smart-alerts/{item_code}")
-async def get_smart_expiry_analysis(
-    item_code: str,
+@router.put("/{invoice_id}", response_model=schemas.PurchaseInvoiceResponse)
+def update_invoice(
+    invoice_id: int,
+    invoice_data: schemas.PurchaseInvoiceUpdate,
     db: Session = Depends(get_db),
-    shop_id: Optional[int] = Query(None)
+    current_user: tuple = Depends(get_current_user)
 ):
-    """Get AI-powered expiry alert analysis for an item"""
+    """Update invoice details after manual verification"""
+    staff, shop_id = current_user
     
-    # Get item
-    item = db.query(PurchaseInvoiceItem).join(PurchaseInvoice).filter(
-        PurchaseInvoiceItem.item_code == item_code,
-        PurchaseInvoice.shop_id == shop_id if shop_id else True
+    invoice = db.query(models.PurchaseInvoice).filter(
+        models.PurchaseInvoice.id == invoice_id,
+        models.PurchaseInvoice.shop_id == shop_id
     ).first()
     
-    if not item:
-        raise HTTPException(status_code=404, detail="Item not found")
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
     
-    # Get AI analysis
-    analysis = ai_analytics.analyze_item_movement_5_parameters(db, item_code, shop_id)
+    # Parse dates
+    def parse_date(date_obj):
+        if isinstance(date_obj, str):
+            try:
+                return datetime.strptime(date_obj, "%Y-%m-%d").date()
+            except:
+                return None
+        return date_obj
     
-    # Check if alerts should be suppressed
-    should_suppress = ai_analytics.should_suppress_expiry_alert(db, item)
+    # Update invoice fields
+    invoice.invoice_number = invoice_data.invoice_number
+    invoice.invoice_date = parse_date(invoice_data.invoice_date)
+    invoice.due_date = parse_date(invoice_data.due_date) if invoice_data.due_date else None
+    invoice.supplier_name = invoice_data.supplier_name
+    invoice.supplier_address = invoice_data.supplier_address
+    invoice.supplier_gstin = invoice_data.supplier_gstin
+    invoice.supplier_dl_numbers = invoice_data.supplier_dl_numbers
+    invoice.supplier_phone = invoice_data.supplier_phone
+    invoice.gross_amount = invoice_data.gross_amount
+    invoice.discount_amount = invoice_data.discount_amount
+    invoice.taxable_amount = invoice_data.taxable_amount
+    invoice.total_gst = invoice_data.total_gst
+    invoice.round_off = invoice_data.round_off
+    invoice.net_amount = invoice_data.net_amount
+    invoice.custom_fields = invoice_data.custom_fields or {}
+    invoice.is_verified = True
+    invoice.verified_by = staff.id
+    invoice.verified_at = datetime.utcnow()
+    invoice.updated_at = datetime.utcnow()
+    
+    # Delete existing items
+    db.query(models.PurchaseInvoiceItem).filter(
+        models.PurchaseInvoiceItem.invoice_id == invoice_id
+    ).delete()
+    
+    # Add updated items
+    for item_data in invoice_data.items:
+        expiry_date = None
+        if item_data.expiry_date:
+            expiry_date = parse_date(item_data.expiry_date)
+        
+        item = models.PurchaseInvoiceItem(
+            invoice_id=invoice.id,
+            shop_id=shop_id,
+            hsn_code=item_data.hsn_code,
+            product_name=item_data.product_name,
+            batch_number=item_data.batch_number,
+            expiry_date=expiry_date,
+            quantity=item_data.quantity,
+            free_quantity=item_data.free_quantity,
+            unit_price=item_data.unit_price,
+            discount_percent=item_data.discount_percent,
+            discount_amount=item_data.discount_amount,
+            taxable_amount=item_data.taxable_amount,
+            cgst_percent=item_data.cgst_percent,
+            cgst_amount=item_data.cgst_amount,
+            sgst_percent=item_data.sgst_percent,
+            sgst_amount=item_data.sgst_amount,
+            igst_percent=item_data.igst_percent,
+            igst_amount=item_data.igst_amount,
+            total_amount=item_data.total_amount,
+            custom_fields=item_data.custom_fields or {}
+        )
+        db.add(item)
+    
+    db.commit()
+    db.refresh(invoice)
+    
+    return invoice
+
+@router.get("/{invoice_id}", response_model=schemas.PurchaseInvoiceResponse)
+def get_invoice(
+    invoice_id: int,
+    db: Session = Depends(get_db),
+    current_user: tuple = Depends(get_current_user)
+):
+    """Get specific invoice details"""
+    staff, shop_id = current_user
+    
+    invoice = db.query(models.PurchaseInvoice).filter(
+        models.PurchaseInvoice.id == invoice_id,
+        models.PurchaseInvoice.shop_id == shop_id
+    ).first()
+    
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    
+    # Get verified_by_name
+    verified_by_name = None
+    if invoice.verified_by:
+        verifier = db.query(Staff).filter(Staff.id == invoice.verified_by).first()
+        if verifier:
+            verified_by_name = verifier.name
+    
+    # Convert to dict and add verified_by_name
+    invoice_dict = {
+        "id": invoice.id,
+        "shop_id": invoice.shop_id,
+        "staff_id": invoice.staff_id,
+        "staff_name": invoice.staff_name,
+        "invoice_number": invoice.invoice_number,
+        "invoice_date": invoice.invoice_date,
+        "due_date": invoice.due_date,
+        "supplier_name": invoice.supplier_name,
+        "supplier_address": invoice.supplier_address,
+        "supplier_gstin": invoice.supplier_gstin,
+        "supplier_dl_numbers": invoice.supplier_dl_numbers,
+        "supplier_phone": invoice.supplier_phone,
+        "gross_amount": invoice.gross_amount,
+        "discount_amount": invoice.discount_amount,
+        "taxable_amount": invoice.taxable_amount,
+        "cgst_amount": invoice.cgst_amount,
+        "sgst_amount": invoice.sgst_amount,
+        "igst_amount": invoice.igst_amount,
+        "total_gst": invoice.total_gst,
+        "round_off": invoice.round_off,
+        "net_amount": invoice.net_amount,
+        "pdf_filename": invoice.pdf_filename,
+        "custom_fields": invoice.custom_fields or {},
+        "is_verified": invoice.is_verified,
+        "verified_by_name": verified_by_name,
+        "verified_at": invoice.verified_at,
+        "created_at": invoice.created_at,
+        "items": invoice.items
+    }
+    
+    return invoice_dict
+
+@router.delete("/{invoice_id}")
+def delete_invoice(
+    invoice_id: int,
+    db: Session = Depends(get_db),
+    current_user: tuple = Depends(get_current_user)
+):
+    """Delete invoice and associated PDF"""
+    staff, shop_id = current_user
+    
+    invoice = db.query(models.PurchaseInvoice).filter(
+        models.PurchaseInvoice.id == invoice_id,
+        models.PurchaseInvoice.shop_id == shop_id
+    ).first()
+    
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    
+    # Delete PDF file
+    if invoice.pdf_path and os.path.exists(invoice.pdf_path):
+        try:
+            os.remove(invoice.pdf_path)
+        except Exception as e:
+            pass  # Continue even if file deletion fails
+    
+    db.delete(invoice)
+    db.commit()
+    
+    return {"message": "Invoice deleted successfully"}
+
+@router.get("/stats/summary")
+def get_invoice_summary(
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    db: Session = Depends(get_db),
+    current_user: tuple = Depends(get_current_user)
+):
+    """Get invoice statistics summary"""
+    staff, shop_id = current_user
+    
+    query = db.query(models.PurchaseInvoice).filter(
+        models.PurchaseInvoice.shop_id == shop_id
+    )
+    
+    if start_date:
+        query = query.filter(models.PurchaseInvoice.invoice_date >= start_date)
+    
+    if end_date:
+        query = query.filter(models.PurchaseInvoice.invoice_date <= end_date)
+    
+    invoices = query.all()
+    
+    total_invoices = len(invoices)
+    total_amount = sum(inv.net_amount for inv in invoices)
+    total_items = sum(len(inv.items) for inv in invoices)
+    
+    # Top suppliers
+    supplier_totals = {}
+    for inv in invoices:
+        if inv.supplier_name not in supplier_totals:
+            supplier_totals[inv.supplier_name] = 0
+        supplier_totals[inv.supplier_name] += inv.net_amount
+    
+    top_suppliers = sorted(supplier_totals.items(), key=lambda x: x[1], reverse=True)[:5]
     
     return {
-        "item_code": item_code,
-        "item_name": item.item_name,
-        "days_to_expiry": item.days_to_expiry,
-        "should_suppress_alert": should_suppress,
-        "ai_analysis": analysis,
-        "recommendation": "Suppress expiry alerts - item will sell before expiry" if should_suppress else "Monitor expiry closely"
+        "total_invoices": total_invoices,
+        "total_amount": total_amount,
+        "total_items": total_items,
+        "average_invoice_amount": total_amount / total_invoices if total_invoices > 0 else 0,
+        "top_suppliers": [{"name": name, "total": total} for name, total in top_suppliers]
     }
-@router.get("/items/slow-moving")
-async def get_slow_moving_items(
-    threshold: float = Query(1.0, description="Movement rate threshold"),
-    db: Session = Depends(get_db),
-    shop_id: Optional[int] = Query(None)
-):
-    """Get slow-moving items that need attention"""
-    
-    query = db.query(PurchaseInvoiceItem).join(PurchaseInvoice).filter(
-        PurchaseInvoiceItem.movement_rate < threshold,
-        PurchaseInvoiceItem.remaining_quantity > 0
-    )
-    
-    if shop_id:
-        query = query.filter(PurchaseInvoice.shop_id == shop_id)
-    
-    items = query.order_by(PurchaseInvoiceItem.movement_rate.asc()).all()
-    
-    return [
-        {
-            "item_code": item.item_code,
-            "item_name": item.item_name,
-            "movement_rate": item.movement_rate,
-            "remaining_quantity": item.remaining_quantity,
-            "days_to_expiry": item.days_to_expiry,
-            "invoice_number": item.invoice.invoice_number,
-            "received_date": item.invoice.received_date
-        }
-        for item in items
-    ]
 
-@router.get("/items/expiring-soon")
-async def get_expiring_items(
-    days: int = Query(45, description="Days until expiry"),
+@router.get("/items/search")
+def search_items(
+    product_name: Optional[str] = None,
+    batch_number: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 100,
     db: Session = Depends(get_db),
-    shop_id: Optional[int] = Query(None)
+    current_user: tuple = Depends(get_current_user)
 ):
-    """Get items expiring within specified days"""
+    """Search invoice items"""
+    staff, shop_id = current_user
     
-    query = db.query(PurchaseInvoiceItem).join(PurchaseInvoice).filter(
-        PurchaseInvoiceItem.days_to_expiry <= days,
-        PurchaseInvoiceItem.days_to_expiry > 0,
-        PurchaseInvoiceItem.remaining_quantity > 0
+    query = db.query(models.PurchaseInvoiceItem).filter(
+        models.PurchaseInvoiceItem.shop_id == shop_id
     )
     
-    if shop_id:
-        query = query.filter(PurchaseInvoice.shop_id == shop_id)
+    if product_name:
+        query = query.filter(models.PurchaseInvoiceItem.product_name.ilike(f"%{product_name}%"))
     
-    items = query.order_by(PurchaseInvoiceItem.days_to_expiry.asc()).all()
+    if batch_number:
+        query = query.filter(models.PurchaseInvoiceItem.batch_number == batch_number)
     
-    return [
-        {
-            "item_code": item.item_code,
-            "item_name": item.item_name,
-            "remaining_quantity": item.remaining_quantity,
-            "days_to_expiry": item.days_to_expiry,
-            "expiry_date": item.expiry_date,
-            "movement_rate": item.movement_rate,
-            "invoice_number": item.invoice.invoice_number
-        }
-        for item in items
-    ]
+    items = query.offset(skip).limit(limit).all()
+    
+    return items

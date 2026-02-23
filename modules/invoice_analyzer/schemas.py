@@ -1,177 +1,113 @@
-from pydantic import BaseModel, Field
-from typing import List, Optional
+from pydantic import BaseModel
+from typing import List, Optional, Dict, Any
 from datetime import date, datetime
-from enum import Enum
 
-class InvoiceStatus(str, Enum):
-    RECEIVED = "received"
-    PARTIAL = "partial"
-    SOLD_OUT = "sold_out"
-    EXPIRED = "expired"
-
-class ColorCode(str, Enum):
-    RED = "red"
-    YELLOW = "yellow"
-    GREEN = "green"
-
-class DemandCategory(str, Enum):
-    FAST = "fast"
-    MEDIUM = "medium"
-    SLOW = "slow"
-    DEAD = "dead"
-
-class AlertType(str, Enum):
-    DAYS_45 = "45_days"
-    YEAR_1 = "1_year"
-    EXPIRED = "expired"
-
-# Purchase Invoice Item Schemas
-class PurchaseInvoiceItemCreate(BaseModel):
-    item_code: str
-    item_name: str
+class PurchaseInvoiceItemUpdate(BaseModel):
+    id: Optional[int] = None
+    hsn_code: Optional[str] = None
+    product_name: str
     batch_number: Optional[str] = None
-    purchased_quantity: float
-    unit_cost: float
-    selling_price: float
     expiry_date: Optional[date] = None
+    quantity: float
+    free_quantity: float = 0.0
+    unit_price: float
+    discount_percent: float = 0.0
+    discount_amount: float = 0.0
+    taxable_amount: float
+    cgst_percent: float = 0.0
+    cgst_amount: float = 0.0
+    sgst_percent: float = 0.0
+    sgst_amount: float = 0.0
+    igst_percent: float = 0.0
+    igst_amount: float = 0.0
+    total_amount: float
+    custom_fields: Optional[Dict[str, Any]] = {}
+
+class PurchaseInvoiceUpdate(BaseModel):
+    invoice_number: str
+    invoice_date: date
+    due_date: Optional[date] = None
+    supplier_name: str
+    supplier_address: Optional[str] = None
+    supplier_gstin: Optional[str] = None
+    supplier_dl_numbers: Optional[str] = None
+    supplier_phone: Optional[str] = None
+    gross_amount: float
+    discount_amount: float = 0.0
+    taxable_amount: float
+    total_gst: float
+    round_off: float = 0.0
+    net_amount: float
+    custom_fields: Optional[Dict[str, Any]] = {}
+    items: List[PurchaseInvoiceItemUpdate]
 
 class PurchaseInvoiceItemResponse(BaseModel):
     id: int
-    item_code: str
-    item_name: str
+    hsn_code: Optional[str]
+    product_name: str
     batch_number: Optional[str]
-    purchased_quantity: float
-    sold_quantity: float
-    remaining_quantity: float
-    unit_cost: float
-    selling_price: float
-    total_cost: float
     expiry_date: Optional[date]
-    days_to_expiry: Optional[int]
-    is_expiring_soon: bool
-    is_expiring_critical: bool
-    movement_rate: float
-    demand_category: str
+    quantity: float
+    free_quantity: float
+    unit_price: float
+    discount_percent: float
+    discount_amount: float
+    taxable_amount: float
+    cgst_percent: float
+    cgst_amount: float
+    sgst_percent: float
+    sgst_amount: float
+    igst_percent: float
+    igst_amount: float
+    total_amount: float
+    custom_fields: Optional[Dict[str, Any]] = {}
     
     class Config:
         from_attributes = True
 
-# Purchase Invoice Schemas
-class PurchaseInvoiceCreate(BaseModel):
-    invoice_number: str
-    supplier_name: str
-    invoice_date: date
-    received_date: date
-    items: List[PurchaseInvoiceItemCreate]
-
 class PurchaseInvoiceResponse(BaseModel):
     id: int
+    shop_id: int
+    staff_id: int
+    staff_name: str
     invoice_number: str
-    supplier_name: str
     invoice_date: date
-    received_date: date
-    total_amount: float
-    total_items: int
-    total_quantity: float
-    sold_percentage: float
-    status: str
-    color_code: str
-    has_expiring_items: bool
-    nearest_expiry_days: Optional[int]
+    due_date: Optional[date]
+    supplier_name: str
+    supplier_address: Optional[str]
+    supplier_gstin: Optional[str]
+    supplier_dl_numbers: Optional[str]
+    supplier_phone: Optional[str]
+    gross_amount: float
+    discount_amount: float
+    taxable_amount: float
+    cgst_amount: float
+    sgst_amount: float
+    igst_amount: float
+    total_gst: float
+    round_off: float
+    net_amount: float
+    pdf_filename: Optional[str]
+    custom_fields: Optional[Dict[str, Any]] = {}
+    is_verified: bool = False
+    verified_by_name: Optional[str] = None
+    verified_at: Optional[datetime] = None
     created_at: datetime
     items: List[PurchaseInvoiceItemResponse]
     
     class Config:
         from_attributes = True
 
-# Item Sale Schemas
-class ItemSaleCreate(BaseModel):
-    item_id: int
-    quantity_sold: float
-    sale_price: float
-    customer_type: Optional[str] = None
-
-class ItemSaleResponse(BaseModel):
+class PurchaseInvoiceListResponse(BaseModel):
     id: int
-    sale_date: date
-    quantity_sold: float
-    sale_price: float
-    profit_margin: float
-    customer_type: Optional[str]
-    
-    class Config:
-        from_attributes = True
-
-# Expiry Alert Schemas
-class ExpiryAlertResponse(BaseModel):
-    id: int
-    alert_type: str
-    alert_date: date
-    message: str
-    priority: str
-    is_acknowledged: bool
-    item_code: str
-    item_name: str
-    days_to_expiry: Optional[int]
-    
-    class Config:
-        from_attributes = True
-
-# Monthly Summary Schemas
-class MonthlyInvoiceSummaryResponse(BaseModel):
-    id: int
-    year: int
-    month: int
-    total_invoices: int
-    total_amount: float
+    invoice_number: str
+    invoice_date: date
+    supplier_name: str
+    net_amount: float
     total_items: int
-    green_invoices: int
-    yellow_invoices: int
-    red_invoices: int
-    month_color: str
-    overall_sold_percentage: float
-    expiring_items_count: int
-    expired_items_count: int
-    ai_insights: Optional[str]
-    movement_prediction: Optional[str]
+    is_verified: bool = False
+    verified_by_name: Optional[str] = None
+    created_at: datetime
     
     class Config:
         from_attributes = True
-
-# Analytics Schemas
-class InvoiceAnalytics(BaseModel):
-    total_invoices: int
-    total_value: float
-    sold_out_invoices: int
-    partial_invoices: int
-    unsold_invoices: int
-    average_sold_percentage: float
-    expiring_alerts: int
-    top_moving_items: List[dict]
-    slow_moving_items: List[dict]
-
-class MovementAnalytics(BaseModel):
-    item_code: str
-    item_name: str
-    total_purchased: float
-    total_sold: float
-    movement_rate: float
-    days_in_stock: int
-    predicted_sellout_days: Optional[int]
-    demand_category: str
-    seasonal_factor: float
-
-class AIInsights(BaseModel):
-    movement_patterns: List[dict]
-    seasonal_trends: List[dict]
-    expiry_predictions: List[dict]
-    stock_recommendations: List[dict]
-    profit_optimization: List[dict]
-
-# Dashboard Schemas
-class DashboardSummary(BaseModel):
-    current_month_summary: MonthlyInvoiceSummaryResponse
-    pending_alerts: List[ExpiryAlertResponse]
-    recent_invoices: List[PurchaseInvoiceResponse]
-    movement_analytics: List[MovementAnalytics]
-    ai_insights: AIInsights

@@ -1,5 +1,6 @@
-from fastapi import Request, HTTPException
+from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
 from app.services.redis_service import redis_service
 import time
 
@@ -25,8 +26,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     }
     
     async def dispatch(self, request: Request, call_next):
-        # Skip rate limiting for health checks
-        if request.url.path in ["/", "/health", "/modules"]:
+        # Skip rate limiting for health checks and OPTIONS requests (CORS preflight)
+        if request.url.path in ["/", "/health", "/modules"] or request.method == "OPTIONS":
             return await call_next(request)
         
         # Get client identifier (IP + user_id if authenticated)
@@ -44,9 +45,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             endpoint_config["limit"], 
             endpoint_config["window"]
         ):
-            raise HTTPException(
+            return JSONResponse(
                 status_code=429,
-                detail=f"Rate limit exceeded. Max {endpoint_config['limit']} requests per {endpoint_config['window']} seconds"
+                content={"detail": f"Rate limit exceeded. Max {endpoint_config['limit']} requests per {endpoint_config['window']} seconds"}
             )
         
         return await call_next(request)

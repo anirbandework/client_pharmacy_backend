@@ -39,10 +39,7 @@ from modules.auth.attendance.models import (
 from modules.notifications.models import (
     Notification, NotificationShopTarget, NotificationStaffTarget, NotificationRead
 )
-from modules.invoice_analyzer.models import (
-    PurchaseInvoice, PurchaseInvoiceItem, ItemSale, 
-    ExpiryAlert, MonthlyInvoiceSummary
-)
+from modules.invoice_analyzer.models import PurchaseInvoice, PurchaseInvoiceItem
 from modules.feedback.models import Feedback
 
 # Create all tables
@@ -86,7 +83,7 @@ app.include_router(attendance_router, prefix="/api/attendance", tags=["Attendanc
 app.include_router(notifications_router, prefix="/api/notifications", tags=["Notifications"])
 app.include_router(feedback_router, prefix="/api/feedback", tags=["Feedback System"])
 app.include_router(customer_router, prefix="/api/customer-tracking", tags=["Customer Tracking"])
-app.include_router(invoice_router, prefix="/api/invoices", tags=["Purchase Invoice Analyzer"])
+app.include_router(invoice_router, prefix="/api/purchase-invoices", tags=["Purchase Invoice Analyzer"])
 app.include_router(stock_router, prefix="/api/stock-audit", tags=["Stock Audit"])
 app.include_router(billing_router, prefix="/api/billing", tags=["Billing System"])
 app.include_router(billing_daily_records_router, prefix="/api/billing", tags=["Daily Records"])
@@ -99,7 +96,7 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "modules": ["auth", "salary_management", "attendance", "notifications", "feedback", "customer_tracking", "invoice_analyzer", "stock_audit", "billing", "profit_analysis"]}
+    return {"status": "healthy", "modules": ["auth", "salary_management", "attendance", "notifications", "feedback", "customer_tracking", "purchase_invoice_analyzer", "stock_audit", "billing", "profit_analysis"]}
 
 @app.get("/modules")
 async def list_modules():
@@ -111,7 +108,7 @@ async def list_modules():
             "notifications": "Admin-to-staff notification system with shop-level and direct messaging",
             "feedback": "Engaging feedback system with mood tracking, ratings, and priority management for admins and staff",
             "customer_tracking": "Regular customer tracking with reminders",
-            "invoice_analyzer": "Purchase invoice tracking with AI-powered movement analysis, expiry alerts, and color-coded status monitoring",
+            "invoice_analyzer": "PDF-based purchase invoice analyzer with automatic data extraction, supplier tracking, and item-wise GST details",
             "stock_audit": "Random section auditing with discrepancy tracking",
             "billing": "Customer billing system with medicine search, stock integration, payment tracking (cash/online), and daily business records",
             "profit_analysis": "Bill-wise profit margin calculation"
