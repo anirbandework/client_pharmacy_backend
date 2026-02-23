@@ -66,7 +66,7 @@ class PurchaseInvoiceItem(Base):
     hsn_code = Column(String, nullable=True)
     product_name = Column(String, nullable=False)
     batch_number = Column(String, nullable=True)
-    expiry_date = Column(Date, nullable=True)
+    expiry_date = Column(String, nullable=True)
     quantity = Column(Float, nullable=False)
     free_quantity = Column(Float, default=0.0)
     unit_price = Column(Float, nullable=False)
@@ -85,5 +85,6 @@ class PurchaseInvoiceItem(Base):
     custom_fields = Column(JSON, nullable=True, default={})
     
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     invoice = relationship("PurchaseInvoice", back_populates="items")
