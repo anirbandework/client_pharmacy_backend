@@ -20,7 +20,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade schema."""
-    # Add staff_id column if it doesn't exist
+    # Add staff_id and staff_name columns if they don't exist
     op.execute("""
         DO $$ 
         BEGIN
@@ -29,6 +29,11 @@ def upgrade() -> None:
                 ALTER TABLE purchase_invoices ADD COLUMN staff_id INTEGER;
                 ALTER TABLE purchase_invoices ADD CONSTRAINT purchase_invoices_staff_id_fkey 
                     FOREIGN KEY (staff_id) REFERENCES staff(id);
+            END IF;
+            
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                          WHERE table_name='purchase_invoices' AND column_name='staff_name') THEN
+                ALTER TABLE purchase_invoices ADD COLUMN staff_name VARCHAR;
             END IF;
         END $$;
     """)
@@ -39,6 +44,11 @@ def downgrade() -> None:
     op.execute("""
         DO $$ 
         BEGIN
+            IF EXISTS (SELECT 1 FROM information_schema.columns 
+                      WHERE table_name='purchase_invoices' AND column_name='staff_name') THEN
+                ALTER TABLE purchase_invoices DROP COLUMN staff_name;
+            END IF;
+            
             IF EXISTS (SELECT 1 FROM information_schema.columns 
                       WHERE table_name='purchase_invoices' AND column_name='staff_id') THEN
                 ALTER TABLE purchase_invoices DROP CONSTRAINT IF EXISTS purchase_invoices_staff_id_fkey;
