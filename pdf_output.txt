@@ -1,4 +1,0 @@
-Traceback (most recent call last):
-  File "/Users/anirbande/Desktop/client backend/debug_pdf.py", line 1, in <module>
-    import pdfplumber
-ModuleNotFoundError: No module named 'pdfplumber'

@@ -218,7 +218,7 @@ def get_stock_items(
     if section_id:
         query = query.filter(models.StockItem.section_id == section_id)
     if item_name:
-        query = query.filter(models.StockItem.item_name.ilike(f"%{item_name}%"))
+        query = query.filter(models.StockItem.product_name.ilike(f"%{item_name}%"))
     if batch_number:
         query = query.filter(models.StockItem.batch_number == batch_number)
     
@@ -302,6 +302,70 @@ def delete_stock_item(
     db.delete(db_item)
     db.commit()
     return {"message": "Stock item deleted successfully"}
+
+@router.get("/items/unassigned/list", response_model=List[schemas.StockItem])
+def get_unassigned_items(
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    current_user: tuple = Depends(get_current_user)
+):
+    """Get stock items without assigned rack/section"""
+    staff, shop_id = current_user
+    items = db.query(models.StockItem).filter(
+        models.StockItem.shop_id == shop_id,
+        models.StockItem.section_id.is_(None)
+    ).offset(skip).limit(limit).all()
+    
+    result = []
+    for item in items:
+        item_dict = {
+            **item.__dict__,
+            "section_name": None,
+            "rack_name": None,
+            "total_value": (item.quantity_software * item.unit_price) if item.unit_price else None
+        }
+        result.append(item_dict)
+    
+    return result
+
+@router.patch("/items/{item_id}/assign-section")
+def assign_section_to_item(
+    item_id: int,
+    section_id: int,
+    db: Session = Depends(get_db),
+    current_user: tuple = Depends(get_current_user)
+):
+    """Assign rack/section to a stock item"""
+    staff, shop_id = current_user
+    
+    # Verify section exists
+    section = db.query(models.StockSection).filter(
+        models.StockSection.id == section_id,
+        models.StockSection.shop_id == shop_id
+    ).first()
+    if not section:
+        raise HTTPException(status_code=404, detail="Section not found")
+    
+    # Update item
+    db_item = db.query(models.StockItem).filter(
+        models.StockItem.id == item_id,
+        models.StockItem.shop_id == shop_id
+    ).first()
+    if not db_item:
+        raise HTTPException(status_code=404, detail="Stock item not found")
+    
+    db_item.section_id = section_id
+    db_item.updated_at = datetime.utcnow()
+    db.commit()
+    
+    return {
+        "message": "Section assigned successfully",
+        "item_id": item_id,
+        "section_id": section_id,
+        "section_name": section.section_name,
+        "rack_number": section.rack.rack_number
+    }
 
 # PURCHASE MANAGEMENT
 

@@ -77,7 +77,6 @@ def get_bills(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     customer_phone: Optional[str] = None,
-    payment_method: Optional[models.PaymentMethod] = None,
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
@@ -93,8 +92,6 @@ def get_bills(
         query = query.filter(models.Bill.created_at <= datetime.combine(end_date, datetime.max.time()))
     if customer_phone:
         query = query.filter(models.Bill.customer_phone == customer_phone)
-    if payment_method:
-        query = query.filter(models.Bill.payment_method == payment_method)
     
     return query.order_by(models.Bill.created_at.desc()).offset(skip).limit(limit).all()
 

@@ -31,25 +31,32 @@ class StockItem(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     shop_id = Column(Integer, ForeignKey("shops.id"), nullable=True, index=True)
-    section_id = Column(Integer, ForeignKey("stock_sections_audit.id"))
+    section_id = Column(Integer, ForeignKey("stock_sections_audit.id"), nullable=True)
     
-    item_name = Column(String, nullable=False, index=True)
-    generic_name = Column(String, nullable=True)
-    brand_name = Column(String, nullable=True)
+    # Invoice fields
+    manufacturer = Column(String, nullable=True)
+    hsn_code = Column(String, nullable=True, index=True)
+    product_name = Column(String, nullable=False, index=True)
     batch_number = Column(String, nullable=False, index=True)
+    package = Column(String, nullable=True)
+    expiry_date = Column(Date, nullable=True)
     
+    # Stock quantities
     quantity_software = Column(Integer, default=0)
     quantity_physical = Column(Integer, nullable=True)
     
-    mrp = Column(Float, nullable=True)
+    # Pricing from invoice
+    mrp = Column(String, nullable=True)
     unit_price = Column(Float, nullable=True)
-    expiry_date = Column(Date, nullable=True)
-    manufacturer = Column(String, nullable=True)
     
+    # Audit tracking
     last_audit_date = Column(DateTime, nullable=True)
     last_audit_by_staff_id = Column(Integer, ForeignKey("staff.id"), nullable=True)
     last_audit_by_staff_name = Column(String, nullable=True)
     audit_discrepancy = Column(Integer, default=0)
+    
+    # Source tracking
+    source_invoice_id = Column(Integer, ForeignKey("purchase_invoices.id"), nullable=True)
     
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

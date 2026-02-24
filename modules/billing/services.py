@@ -37,18 +37,17 @@ class BillingService:
             StockItem,
             StockSection.section_name,
             StockRack.rack_number
-        ).join(
+        ).outerjoin(
             StockSection, StockItem.section_id == StockSection.id
-        ).join(
+        ).outerjoin(
             StockRack, StockSection.rack_id == StockRack.id
         ).filter(
             StockItem.shop_id == shop_id,
             StockItem.quantity_software > 0,  # Only available items
             or_(
-                StockItem.item_name.ilike(f"%{search_term}%"),
-                StockItem.generic_name.ilike(f"%{search_term}%"),
-                StockItem.brand_name.ilike(f"%{search_term}%"),
-                StockItem.batch_number.ilike(f"%{search_term}%")
+                StockItem.product_name.ilike(f"%{search_term}%"),
+                StockItem.batch_number.ilike(f"%{search_term}%"),
+                StockItem.manufacturer.ilike(f"%{search_term}%")
             )
         ).limit(limit)
         
@@ -56,17 +55,17 @@ class BillingService:
         for item, section_name, rack_number in query.all():
             results.append({
                 "id": item.id,
-                "item_name": item.item_name,
-                "generic_name": item.generic_name,
-                "brand_name": item.brand_name,
+                "product_name": item.product_name,
                 "batch_number": item.batch_number,
                 "quantity_available": item.quantity_software,
                 "mrp": item.mrp,
                 "unit_price": item.unit_price,
-                "rack_number": rack_number,
-                "section_name": section_name,
+                "rack_number": rack_number or "Unassigned",
+                "section_name": section_name or "Unassigned",
                 "expiry_date": item.expiry_date.isoformat() if item.expiry_date else None,
-                "manufacturer": item.manufacturer
+                "manufacturer": item.manufacturer,
+                "hsn_code": item.hsn_code,
+                "package": item.package
             })
         
         return results
@@ -98,7 +97,7 @@ class BillingService:
             
             if stock_item.quantity_software < item_data['quantity']:
                 raise ValueError(
-                    f"Insufficient stock for {stock_item.item_name}. "
+                    f"Insufficient stock for {stock_item.product_name}. "
                     f"Available: {stock_item.quantity_software}, Required: {item_data['quantity']}"
                 )
             
@@ -115,8 +114,15 @@ class BillingService:
         discount_amount = bill_data.get('discount_amount', 0.0)
         total_amount = subtotal - discount_amount + tax_amount
         
-        # Calculate change
-        amount_paid = bill_data['amount_paid']
+        # Calculate total paid and change
+        cash_amount = bill_data.get('cash_amount', 0.0)
+        card_amount = bill_data.get('card_amount', 0.0)
+        online_amount = bill_data.get('online_amount', 0.0)
+        amount_paid = cash_amount + card_amount + online_amount
+        
+        if amount_paid < total_amount:
+            raise ValueError(f"Insufficient payment. Total: {total_amount}, Paid: {amount_paid}")
+        
         change_returned = max(0, amount_paid - total_amount)
         
         # Generate bill number
@@ -134,7 +140,9 @@ class BillingService:
             doctor_name=bill_data.get('doctor_name'),
             customer_category=bill_data.get('customer_category'),
             was_contacted_before=bill_data.get('was_contacted_before', False),
-            payment_method=bill_data['payment_method'],
+            cash_amount=cash_amount,
+            card_amount=card_amount,
+            online_amount=online_amount,
             payment_reference=bill_data.get('payment_reference'),
             subtotal=subtotal,
             discount_amount=discount_amount,
@@ -194,14 +202,14 @@ class BillingService:
                 shop_id=shop_id,
                 bill_id=bill.id,
                 stock_item_id=stock_item.id,
-                item_name=stock_item.item_name,
+                item_name=stock_item.product_name,
                 batch_number=stock_item.batch_number,
-                generic_name=stock_item.generic_name,
-                brand_name=stock_item.brand_name,
+                generic_name=None,
+                brand_name=None,
                 rack_number=rack_number,
                 section_name=section_name,
                 quantity=item_data['quantity'],
-                mrp=item_data.get('mrp'),
+                mrp=stock_item.mrp,
                 unit_price=item_data['unit_price'],
                 discount_percent=discount_percent,
                 discount_amount=item_discount,
@@ -246,14 +254,15 @@ class BillingService:
         total_revenue = sum(b.total_amount for b in bills)
         
         # Payment method breakdown
-        from .models import PaymentMethod
-        cash_sales = sum(b.total_amount for b in bills if b.payment_method == PaymentMethod.CASH)
-        online_sales = sum(b.total_amount for b in bills if b.payment_method == PaymentMethod.ONLINE)
+        cash_sales = sum(b.cash_amount for b in bills)
+        card_sales = sum(b.card_amount for b in bills)
+        online_sales = sum(b.online_amount for b in bills)
         
         return {
             "total_bills": total_bills,
             "total_revenue": float(total_revenue),
             "cash_sales": float(cash_sales),
+            "card_sales": float(card_sales),
             "online_sales": float(online_sales),
             "average_bill_value": float(total_revenue / total_bills) if total_bills > 0 else 0.0
         }
@@ -286,7 +295,7 @@ class BillingService:
         
         return [
             {
-                "item_name": r.item_name,
+                "product_name": r.item_name,
                 "total_quantity": r.total_quantity,
                 "total_revenue": float(r.total_revenue),
                 "transaction_count": r.transaction_count

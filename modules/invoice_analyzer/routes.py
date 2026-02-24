@@ -8,8 +8,11 @@ from typing import List, Optional
 from datetime import datetime, date
 import os
 import shutil
+import logging
 from . import models, schemas
 from .ai_extractor import AIInvoiceExtractor
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -45,10 +48,15 @@ async def upload_invoice_pdf(
     current_user: tuple = Depends(get_current_user)
 ):
     """Upload and process purchase invoice PDF"""
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"📤 Upload request received - File: {file.filename}, Size: {file.size if hasattr(file, 'size') else 'unknown'}")
+    
     staff, shop_id = current_user
     
     # Validate file type
     if not file.filename.endswith('.pdf'):
+        logger.error(f"❌ Invalid file type: {file.filename}")
         raise HTTPException(status_code=400, detail="Only PDF files are allowed")
     
     # Save PDF file temporarily
@@ -57,36 +65,40 @@ async def upload_invoice_pdf(
     file_path = os.path.join(UPLOAD_DIR, filename)
     
     try:
+        logger.info(f"💾 Saving file to: {file_path}")
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
+        logger.info(f"✅ File saved successfully")
     except Exception as e:
+        logger.error(f"❌ Failed to save file: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
     
     # Extract text from PDF
     try:
+        logger.info(f"🔍 Starting PDF extraction...")
         extractor = AIInvoiceExtractor()
         parsed_data = extractor.extract_from_pdf(file_path)
+        logger.info(f"✅ PDF extraction completed - Found {len(parsed_data.get('items', []))} items")
     except Exception as e:
+        logger.error(f"❌ PDF extraction failed: {str(e)}")
         os.remove(file_path)
         raise HTTPException(status_code=400, detail=f"Failed to parse PDF: {str(e)}")
     
-    # Check for duplicate invoice
+    # Check for duplicate invoice (by invoice number OR by supplier+date+amount)
     invoice_number = parsed_data.get("invoice_number", "UNKNOWN")
     supplier_name = parsed_data.get("supplier_name", "Unknown Supplier")
     net_amount = parsed_data.get("net_amount", 0.0)
     
     existing_invoice = db.query(models.PurchaseInvoice).filter(
         models.PurchaseInvoice.shop_id == shop_id,
-        models.PurchaseInvoice.invoice_number == invoice_number,
-        models.PurchaseInvoice.supplier_name == supplier_name,
-        models.PurchaseInvoice.net_amount == net_amount
+        models.PurchaseInvoice.invoice_number == invoice_number
     ).first()
     
     if existing_invoice:
         os.remove(file_path)
         raise HTTPException(
             status_code=409,
-            detail=f"Duplicate invoice detected! Invoice '{invoice_number}' from '{supplier_name}' with amount ₹{net_amount:.2f} already exists."
+            detail=f"Duplicate invoice detected! Invoice number '{invoice_number}' already exists."
         )
     
     # Parse dates
@@ -127,22 +139,36 @@ async def upload_invoice_pdf(
     
     # Create invoice items
     for item_data in parsed_data.get("items", []):
-        # Parse expiry date
+        # Parse expiry date - handle both MM/YYYY and DD/MM/YYYY formats
         expiry_date = None
         if item_data.get("expiry_date"):
             try:
-                expiry_date = datetime.strptime(f"01/{item_data['expiry_date']}", "%d/%m/%Y")
+                expiry_str = item_data['expiry_date']
+                # If it's already a datetime, convert to date
+                if isinstance(expiry_str, datetime):
+                    expiry_date = expiry_str.date()
+                elif '/' in expiry_str:
+                    parts = expiry_str.split('/')
+                    # If only 2 parts (MM/YYYY), prepend day as 01
+                    if len(parts) == 2:
+                        expiry_date = datetime.strptime(f"01/{expiry_str}", "%d/%m/%Y").date()
+                    # If 3 parts (DD/MM/YYYY), parse as-is
+                    elif len(parts) == 3:
+                        expiry_date = datetime.strptime(expiry_str, "%d/%m/%Y").date()
             except:
                 pass
         
         item = models.PurchaseInvoiceItem(
             invoice_id=invoice.id,
             shop_id=shop_id,
+            manufacturer=item_data.get("manufacturer"),
             hsn_code=item_data.get("hsn_code"),
             product_name=item_data.get("product_name", "Unknown Product"),
             batch_number=item_data.get("batch_number"),
-            expiry_date=expiry_date,
             quantity=item_data.get("quantity", 1),
+            package=item_data.get("package"),
+            expiry_date=expiry_date,
+            mrp=item_data.get("mrp"),
             free_quantity=item_data.get("free_quantity", 0.0),
             unit_price=item_data.get("unit_price", 0.0),
             discount_percent=item_data.get("discount_percent", 0.0),
@@ -209,6 +235,7 @@ def get_invoices(
             "total_items": len(inv.items),
             "is_verified": inv.is_verified,
             "verified_by_name": verified_by_name,
+            "staff_name": inv.staff_name,
             "created_at": inv.created_at
         })
     
@@ -276,11 +303,14 @@ def update_invoice(
         item = models.PurchaseInvoiceItem(
             invoice_id=invoice.id,
             shop_id=shop_id,
+            manufacturer=item_data.manufacturer,
             hsn_code=item_data.hsn_code,
             product_name=item_data.product_name,
             batch_number=item_data.batch_number,
-            expiry_date=expiry_date,
             quantity=item_data.quantity,
+            package=item_data.package,
+            expiry_date=expiry_date,
+            mrp=item_data.mrp,
             free_quantity=item_data.free_quantity,
             unit_price=item_data.unit_price,
             discount_percent=item_data.discount_percent,
@@ -299,6 +329,15 @@ def update_invoice(
     
     db.commit()
     db.refresh(invoice)
+    
+    # Sync to stock audit system
+    try:
+        from modules.stock_audit.sync_service import InvoiceStockSyncService
+        sync_result = InvoiceStockSyncService.sync_invoice_to_stock(db, invoice_id, shop_id)
+        logger.info(f"✅ Synced invoice {invoice_id} to stock: {sync_result}")
+    except Exception as e:
+        logger.error(f"❌ Failed to sync invoice to stock: {e}")
+        # Don't fail the request if sync fails
     
     return invoice
 
@@ -366,7 +405,7 @@ def delete_invoice(
     db: Session = Depends(get_db),
     current_user: tuple = Depends(get_current_user)
 ):
-    """Delete invoice and associated PDF"""
+    """Delete invoice and reverse stock quantities"""
     staff, shop_id = current_user
     
     invoice = db.query(models.PurchaseInvoice).filter(
@@ -376,6 +415,36 @@ def delete_invoice(
     
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
+    
+    # Reverse stock quantities if invoice was verified and synced
+    if invoice.is_verified:
+        try:
+            from modules.stock_audit.models import StockItem
+            
+            for invoice_item in invoice.items:
+                # Find corresponding stock item
+                stock_item = db.query(StockItem).filter(
+                    StockItem.shop_id == shop_id,
+                    StockItem.product_name == invoice_item.product_name,
+                    StockItem.batch_number == invoice_item.batch_number
+                ).first()
+                
+                if stock_item:
+                    # Reverse the quantity
+                    stock_item.quantity_software -= int(invoice_item.quantity)
+                    
+                    # If quantity becomes 0 or negative and item was only from this invoice, delete it
+                    if stock_item.quantity_software <= 0 and stock_item.source_invoice_id == invoice_id:
+                        db.delete(stock_item)
+                        logger.info(f"Deleted stock item {stock_item.id} (quantity became {stock_item.quantity_software})")
+                    else:
+                        stock_item.updated_at = datetime.utcnow()
+                        logger.info(f"Reversed stock for {stock_item.product_name}: -{invoice_item.quantity}")
+            
+            db.flush()
+        except Exception as e:
+            logger.error(f"Failed to reverse stock quantities: {e}")
+            # Continue with invoice deletion even if stock reversal fails
     
     # Delete PDF file
     if invoice.pdf_path and os.path.exists(invoice.pdf_path):
@@ -387,7 +456,7 @@ def delete_invoice(
     db.delete(invoice)
     db.commit()
     
-    return {"message": "Invoice deleted successfully"}
+    return {"message": "Invoice deleted successfully", "stock_reversed": invoice.is_verified}
 
 @router.get("/stats/summary")
 def get_invoice_summary(

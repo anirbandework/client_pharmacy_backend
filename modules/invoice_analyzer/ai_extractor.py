@@ -19,10 +19,20 @@ class AIInvoiceExtractor:
     def __init__(self):
         self.api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
         if self.api_key and GENAI_AVAILABLE:
-            genai.configure(api_key=self.api_key)
-            self.model = genai.GenerativeModel('gemini-1.5-flash-latest')
+            try:
+                genai.configure(api_key=self.api_key)
+                # Use Gemini 2.5 Flash (fastest and most cost-effective)
+                self.model = genai.GenerativeModel('models/gemini-2.5-flash')
+                logger.info("✅ Gemini AI configured successfully with gemini-2.5-flash - AI extraction enabled")
+            except Exception as e:
+                logger.error(f"❌ Failed to configure Gemini AI: {e}")
+                self.model = None
         else:
             self.model = None
+            if not self.api_key:
+                logger.warning("⚠️ No Gemini API key found - using fallback extraction")
+            if not GENAI_AVAILABLE:
+                logger.warning("⚠️ google-generativeai not installed - using fallback extraction")
     
     def extract_from_pdf(self, pdf_path: str) -> Dict[str, Any]:
         """Extract invoice data using AI"""
@@ -54,6 +64,8 @@ class AIInvoiceExtractor:
     def _ai_extract(self, text: str) -> Dict[str, Any]:
         """Use AI to extract invoice data"""
         
+        logger.info("🤖 Using Gemini AI for invoice extraction...")
+        
         prompt = f"""
 Extract ALL data from this invoice. Return ONLY valid JSON (no markdown):
 
@@ -68,11 +80,14 @@ Extract ALL data from this invoice. Return ONLY valid JSON (no markdown):
   "supplier_phone": "phone number or null",
   "items": [
     {{
+      "manufacturer": "Mfg code or null",
       "hsn_code": "HSN code",
       "product_name": "product name",
       "batch_number": "batch",
-      "expiry_date": "MM/YYYY",
       "quantity": number,
+      "package": "Pkg value like '10 X 6' or null",
+      "expiry_date": "MM/YYYY",
+      "mrp": "exact MRP text like '69.00/STRIP' or '299.00/STRIP' or null",
       "free_quantity": 0,
       "unit_price": number,
       "discount_percent": 0,
@@ -97,6 +112,16 @@ Extract ALL data from this invoice. Return ONLY valid JSON (no markdown):
 
 Rules:
 - Extract ALL items from the invoice
+- IMPORTANT: Mfg and HSN are SEPARATE fields:
+  * Mfg (manufacturer) is typically 4 letters (e.g., "ELEG", "BIOD")
+  * HSN code is typically 8 digits (e.g., "30042064", "30049099")
+  * Do NOT concatenate them - keep them separate
+- Extract Pkg (package) column if present (e.g., "10 X 6", "10 x 10")
+- Extract MRP column if present - keep EXACT text as shown (e.g., "69.00/STRIP", "299.00/STRIP", "422.20/BOTTLE")
+- For expiry_date: Use the EXACT format from the invoice
+  * If invoice shows MM/YYYY (e.g., "11/2026"), use "11/2026"
+  * If invoice shows DD/MM/YYYY (e.g., "15/11/2026"), use "15/11/2026"
+  * Keep the format as-is from the source document
 - Use exact amounts from the invoice
 - Calculate total_gst as sum of all CGST + SGST + IGST
 - If CGST/SGST are present, IGST should be 0
@@ -121,8 +146,22 @@ Invoice:
             
             # Validate and fix data
             if not data.get("items"):
-                logger.warning("AI returned no items, using fallback")
+                logger.warning("⚠️ AI returned no items, using fallback")
                 return self._fallback_extract(text)
+            
+            logger.info(f"✅ AI extraction successful - extracted {len(data.get('items', []))} items")
+            
+            # Fix common extraction errors
+            for item in data.get("items", []):
+                # Fix concatenated Mfg+HSN (e.g., "ELEG30042064" should be Mfg="ELEG", HSN="30042064")
+                if item.get("manufacturer") and len(item["manufacturer"]) > 4:
+                    # Check if it's Mfg+HSN concatenated
+                    import re
+                    match = re.match(r'^([A-Z]{4})(\d{8})$', item["manufacturer"])
+                    if match:
+                        item["manufacturer"] = match.group(1)
+                        if not item.get("hsn_code") or item["hsn_code"] == "-":
+                            item["hsn_code"] = match.group(2)
             
             # Ensure total_gst is calculated
             if data.get("total_gst", 0) == 0:
@@ -134,16 +173,18 @@ Invoice:
             return data
             
         except json.JSONDecodeError as e:
-            logger.error(f"AI JSON error: {e}")
+            logger.error(f"❌ AI JSON parsing error: {e} - using fallback")
             return self._fallback_extract(text)
         except Exception as e:
-            logger.error(f"AI failed: {e}")
+            logger.error(f"❌ AI extraction failed: {e} - using fallback")
             return self._fallback_extract(text)
     
     def _fallback_extract(self, text: str) -> Dict[str, Any]:
         """Enhanced fallback extraction"""
         import re
         from datetime import datetime
+        
+        logger.info("🔧 Using fallback regex extraction...")
         
         lines = [l.strip() for l in text.split('\n') if l.strip()]
         
@@ -311,11 +352,20 @@ Invoice:
                 batch_match = re.search(r'\b([A-Z0-9]{5,10})\b', line)
                 batch = batch_match.group(1) if batch_match and batch_match.group(1) != hsn_code else None
                 
-                # Extract quantity (number before expiry)
-                qty_match = re.search(r'\b(\d+)\s+\d{2}/\d{4}', line)
+                # Extract quantity (number before package or expiry)
+                qty_match = re.search(r'\b(\d+)\s+(?:(\d+\s*[xX]\s*\d+)|\d{2}/\d{4})', line)
                 quantity = float(qty_match.group(1)) if qty_match else 1.0
                 
-                # Extract expiry
+                # Extract package (e.g., "10 X 6" or "10 x 10")
+                pkg_match = re.search(r'(\d+\s*[xX]\s*\d+)', line)
+                package = pkg_match.group(1) if pkg_match else None
+                
+                # Extract MRP (e.g., "69.00/STRIP" or "299.00/STRIP")
+                # Look for pattern: number/UNIT but NOT if preceded by expiry date pattern
+                mrp_match = re.search(r'(?<!\d{2}/\d{4}\s)([\d.]+/(?:STRIP|BOTTLE|PACK|TUBE|BOX))', line)
+                mrp = mrp_match.group(1) if mrp_match else None
+                
+                # Extract expiry (MM/YYYY format)
                 expiry_match = re.search(r'(\d{2}/\d{4})', line)
                 expiry = expiry_match.group(1) if expiry_match else None
                 
@@ -332,11 +382,14 @@ Invoice:
                     rate = amounts[-6]
                     
                     items.append({
+                        "manufacturer": mfg_code,
                         "hsn_code": hsn_code,
                         "product_name": product_name,
                         "batch_number": batch,
-                        "expiry_date": expiry,
                         "quantity": quantity,
+                        "package": package,
+                        "expiry_date": expiry,
+                        "mrp": mrp,
                         "free_quantity": 0,
                         "unit_price": rate / quantity if quantity > 0 else rate,
                         "discount_percent": 0,

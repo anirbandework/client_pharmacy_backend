@@ -89,7 +89,7 @@ class StockCalculationService:
                 raise ValueError(f"Stock item {item_data['stock_item_id']} not found")
             
             if stock_item.quantity_software < item_data['quantity']:
-                raise ValueError(f"Insufficient stock for {stock_item.item_name}. Available: {stock_item.quantity_software}, Required: {item_data['quantity']}")
+                raise ValueError(f"Insufficient stock for {stock_item.product_name}. Available: {stock_item.quantity_software}, Required: {item_data['quantity']}")
             
             sale_item = SaleItem(
                 sale_id=sale.id,

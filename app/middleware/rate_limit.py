@@ -21,6 +21,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # Stock operations - higher limits
         "/api/stock-audit": {"limit": 200, "window": 60},
         
+        # Invoice upload - higher limit for file uploads
+        "/api/purchase-invoices/upload": {"limit": 20, "window": 60},
+        
         # Default for all other endpoints
         "default": {"limit": 1000, "window": 60}  # 1000 per minute
     }

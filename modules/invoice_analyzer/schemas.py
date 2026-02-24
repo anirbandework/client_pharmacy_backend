@@ -4,10 +4,14 @@ from datetime import date, datetime
 
 class PurchaseInvoiceItemUpdate(BaseModel):
     id: Optional[int] = None
+    manufacturer: Optional[str] = None
     hsn_code: Optional[str] = None
     product_name: str
     batch_number: Optional[str] = None
+    quantity: float
+    package: Optional[str] = None
     expiry_date: Optional[date] = None
+    mrp: Optional[str] = None
     quantity: float
     free_quantity: float = 0.0
     unit_price: float
@@ -43,11 +47,14 @@ class PurchaseInvoiceUpdate(BaseModel):
 
 class PurchaseInvoiceItemResponse(BaseModel):
     id: int
+    manufacturer: Optional[str]
     hsn_code: Optional[str]
     product_name: str
     batch_number: Optional[str]
-    expiry_date: Optional[date]
     quantity: float
+    package: Optional[str]
+    expiry_date: Optional[date]
+    mrp: Optional[str]
     free_quantity: float
     unit_price: float
     discount_percent: float
@@ -107,6 +114,7 @@ class PurchaseInvoiceListResponse(BaseModel):
     total_items: int
     is_verified: bool = False
     verified_by_name: Optional[str] = None
+    staff_name: str
     created_at: datetime
     
     class Config:

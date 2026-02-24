@@ -6,7 +6,7 @@ from .models import PaymentMethod
 class BillItemCreate(BaseModel):
     stock_item_id: int
     quantity: int
-    mrp: Optional[float] = None  # Maximum Retail Price
+    mrp: Optional[str] = None  # Maximum Retail Price (e.g., "69.00/STRIP")
     unit_price: float  # Actual selling price
     discount_percent: float = 0.0
     tax_percent: float = 5.0  # Default 5% GST for medicines
@@ -21,7 +21,7 @@ class BillItemResponse(BaseModel):
     rack_number: Optional[str]
     section_name: Optional[str]
     quantity: int
-    mrp: Optional[float]
+    mrp: Optional[str]
     unit_price: float
     discount_percent: float
     discount_amount: float
@@ -41,12 +41,16 @@ class BillCreate(BaseModel):
     customer_phone: Optional[str] = None
     customer_email: Optional[str] = None
     doctor_name: Optional[str] = None
-    customer_category: Optional[str] = None  # contact_sheet, first_time_prescription, regular_branded, generic_informed
+    customer_category: Optional[str] = None
     was_contacted_before: bool = False
-    payment_method: PaymentMethod
+    
+    # Split payment amounts
+    cash_amount: float = 0.0
+    card_amount: float = 0.0
+    online_amount: float = 0.0
     payment_reference: Optional[str] = None
+    
     discount_amount: float = 0.0
-    amount_paid: float
     notes: Optional[str] = None
     prescription_required: Optional[str] = None
     items: List[BillItemCreate]
@@ -56,6 +60,13 @@ class BillCreate(BaseModel):
     def validate_items(cls, v):
         if not v or len(v) == 0:
             raise ValueError('At least one item is required')
+        return v
+    
+    @field_validator('cash_amount', 'card_amount', 'online_amount')
+    @classmethod
+    def validate_amounts(cls, v):
+        if v < 0:
+            raise ValueError('Amount cannot be negative')
         return v
 
 class BillResponse(BaseModel):
@@ -68,8 +79,13 @@ class BillResponse(BaseModel):
     customer_phone: Optional[str]
     customer_email: Optional[str]
     doctor_name: Optional[str]
-    payment_method: PaymentMethod
+    
+    # Split payment
+    cash_amount: float
+    card_amount: float
+    online_amount: float
     payment_reference: Optional[str]
+    
     subtotal: float
     discount_amount: float
     tax_amount: float
@@ -86,20 +102,22 @@ class BillResponse(BaseModel):
 
 class MedicineSearchResult(BaseModel):
     id: int
-    item_name: str
-    generic_name: Optional[str]
-    brand_name: Optional[str]
+    product_name: str
     batch_number: str
     quantity_available: int
+    mrp: Optional[str]
     unit_price: Optional[float]
     rack_number: Optional[str]
     section_name: Optional[str]
     expiry_date: Optional[str]
     manufacturer: Optional[str]
+    hsn_code: Optional[str]
+    package: Optional[str]
 
 class BillSummary(BaseModel):
     total_bills: int
     total_revenue: float
     cash_sales: float
+    card_sales: float
     online_sales: float
     average_bill_value: float

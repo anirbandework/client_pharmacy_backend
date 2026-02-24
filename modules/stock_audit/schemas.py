@@ -34,22 +34,22 @@ class StoreSection(StoreSectionBase):
 
 # Stock Item Schemas
 class StockItemBase(BaseModel):
-    item_name: str
-    generic_name: Optional[str] = None
-    brand_name: Optional[str] = None
-    batch_number: str
-    mrp: Optional[float] = None
-    unit_price: Optional[float] = None
-    expiry_date: Optional[date] = None
     manufacturer: Optional[str] = None
+    hsn_code: Optional[str] = None
+    product_name: str
+    batch_number: str
+    package: Optional[str] = None
+    expiry_date: Optional[date] = None
+    mrp: Optional[str] = None
+    unit_price: Optional[float] = None
 
 class StockItemCreate(StockItemBase):
-    section_id: int
+    section_id: Optional[int] = None
     quantity_software: int = 0
 
 class StockItem(StockItemBase):
     id: int
-    section_id: int
+    section_id: Optional[int] = None
     quantity_software: int
     quantity_physical: Optional[int] = None
     last_audit_date: Optional[datetime] = None
@@ -58,6 +58,7 @@ class StockItem(StockItemBase):
     section_name: Optional[str] = None
     rack_name: Optional[str] = None
     total_value: Optional[float] = None
+    source_invoice_id: Optional[int] = None
     
     class Config:
         from_attributes = True

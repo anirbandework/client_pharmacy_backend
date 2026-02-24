@@ -1,7 +1,8 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_
+from sqlalchemy.exc import IntegrityError
 from .daily_records_models import DailyRecord, DailyExpense
-from .models import Bill, PaymentMethod
+from .models import Bill
 from datetime import date, datetime
 from typing import Optional, Dict, Any
 
@@ -29,7 +30,14 @@ class DailyRecordsService:
                 staff_name=staff_name
             )
             db.add(record)
-            db.flush()
+            try:
+                db.flush()
+            except IntegrityError:
+                db.rollback()
+                record = db.query(DailyRecord).filter(
+                    DailyRecord.shop_id == shop_id,
+                    DailyRecord.record_date == record_date
+                ).first()
         
         return record
     
@@ -47,8 +55,8 @@ class DailyRecordsService:
         
         no_of_bills = len(bills)
         software_sales = sum(b.total_amount for b in bills)
-        cash_sales = sum(b.total_amount for b in bills if b.payment_method == PaymentMethod.CASH)
-        online_sales = sum(b.total_amount for b in bills if b.payment_method == PaymentMethod.ONLINE)
+        cash_sales = sum(b.cash_amount for b in bills)
+        online_sales = sum(b.online_amount for b in bills)
         
         return {
             "no_of_bills": no_of_bills,
