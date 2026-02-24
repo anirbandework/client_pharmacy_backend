@@ -6,11 +6,9 @@ echo "🚀 Starting Pharmacy Management System..."
 echo "📊 Environment Check:"
 echo "PORT: $PORT"
 echo "DATABASE_URL: ${DATABASE_URL:0:20}..."
-echo "REDIS_URL: ${REDIS_URL:0:20}..."
 
-# Run Alembic migrations
-echo "🔄 Running database migrations...
-alembic upgrade head || echo "⚠️  Migrations skipped (tables may already exist)"
+# Skip Alembic migrations - tables created by SQLAlchemy
+echo "⚠️  Skipping Alembic migrations (using SQLAlchemy create_all)"
 
 # Start FastAPI application
 echo "🌐 Starting FastAPI server on 0.0.0.0:$PORT..."
