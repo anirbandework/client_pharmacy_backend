@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from app.database.database import get_db
 from typing import List
 from datetime import datetime
+from pydantic import BaseModel
 from . import schemas, models
 from .service import AuthService
 from .dependencies import get_current_admin, get_current_staff, get_current_super_admin, require_permission
@@ -775,3 +776,23 @@ def get_staff_shop(
 ):
     """Get shop details for current staff"""
     return staff.shop
+
+# STAFF PASSWORD VERIFICATION (for sensitive module access)
+
+class PasswordVerifyRequest(BaseModel):
+    password: str
+
+@router.post("/staff/verify-password")
+def verify_staff_password(
+    request: PasswordVerifyRequest,
+    staff: models.Staff = Depends(get_current_staff),
+    db: Session = Depends(get_db)
+):
+    """Verify staff password for accessing sensitive modules"""
+    if not staff.password_hash:
+        raise HTTPException(status_code=400, detail="Password not set")
+    
+    if not AuthService.verify_password(request.password, staff.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid password")
+    
+    return {"verified": True, "message": "Password verified successfully"}

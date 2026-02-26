@@ -21,6 +21,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # Stock operations - higher limits
         "/api/stock-audit": {"limit": 200, "window": 60},
         
+        # Attendance WiFi status - very high limit for frequent polling
+        "/api/attendance/wifi/status": {"limit": 1000, "window": 60},
+        
+        # Feedback unread count - high limit for frequent polling
+        "/api/feedback/my-feedback/unread-count": {"limit": 1000, "window": 60},
+        
         # Invoice upload - higher limit for file uploads
         "/api/purchase-invoices/upload": {"limit": 20, "window": 60},
         
@@ -29,8 +35,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     }
     
     async def dispatch(self, request: Request, call_next):
-        # Skip rate limiting for health checks and OPTIONS requests (CORS preflight)
-        if request.url.path in ["/", "/health", "/modules"] or request.method == "OPTIONS":
+        # Skip rate limiting for health checks, OPTIONS requests, and frequent polling endpoints
+        skip_paths = [
+            "/", "/health", "/modules",
+            "/api/attendance/wifi/status",
+            "/api/feedback/my-feedback/unread-count"
+        ]
+        if request.url.path in skip_paths or request.method == "OPTIONS":
             return await call_next(request)
         
         # Get client identifier (IP + user_id if authenticated)

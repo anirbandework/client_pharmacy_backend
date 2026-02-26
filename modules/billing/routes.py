@@ -5,32 +5,10 @@ from app.database.database import get_db
 from datetime import datetime, date, timedelta
 from typing import Optional, List
 from . import schemas, models, services
-from modules.auth.dependencies import get_current_user as get_user_dict
-from modules.auth.models import Staff, Shop
+from .dependencies import get_current_user_with_geofence as get_current_user
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from io import BytesIO
-
-def get_current_user(user_dict: dict = Depends(get_user_dict), db: Session = Depends(get_db)) -> tuple[Staff, int]:
-    """Extract staff user from auth dict and resolve shop_id from shop_code"""
-    if user_dict["token_data"].user_type != "staff":
-        raise HTTPException(status_code=403, detail="Staff access required")
-    
-    staff = user_dict["user"]
-    shop_code = user_dict["token_data"].shop_code
-    
-    if not shop_code:
-        raise HTTPException(status_code=400, detail="Shop code not found in token")
-    
-    # Resolve shop_id from shop_code using organization_id
-    shop = db.query(Shop).filter(
-        Shop.shop_code == shop_code,
-        Shop.organization_id == staff.shop.organization_id
-    ).first()
-    if not shop:
-        raise HTTPException(status_code=404, detail=f"Shop not found with code: {shop_code}")
-    
-    return staff, shop.id
 
 router = APIRouter()
 

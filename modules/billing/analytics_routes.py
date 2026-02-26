@@ -6,18 +6,7 @@ from datetime import date, timedelta
 from typing import List, Dict, Any
 from .daily_records_models import DailyRecord, DailyExpense
 from .models import Bill
-from modules.auth.dependencies import get_current_user as get_user_dict
-from modules.auth.models import Staff, Shop
-
-def get_current_user(user_dict: dict = Depends(get_user_dict), db: Session = Depends(get_db)) -> tuple[Staff, int]:
-    """Extract staff user from auth dict and resolve shop_id"""
-    staff = user_dict["user"]
-    shop_code = user_dict["token_data"].shop_code
-    shop = db.query(Shop).filter(
-        Shop.shop_code == shop_code,
-        Shop.organization_id == staff.shop.organization_id
-    ).first()
-    return staff, shop.id
+from .dependencies import get_current_user_with_geofence as get_current_user
 
 router = APIRouter()
 

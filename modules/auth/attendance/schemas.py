@@ -1,4 +1,4 @@
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, field_serializer
 from datetime import datetime, date, time
 from typing import Optional, List
 
@@ -6,18 +6,23 @@ from typing import Optional, List
 class ShopWiFiCreate(BaseModel):
     wifi_ssid: str
     wifi_password: Optional[str] = None
-
-class ShopWiFiSetup(BaseModel):
-    shop_id: int
-    wifi_ssid: str
-    wifi_password: Optional[str] = None
+    shop_latitude: str  # Required
+    shop_longitude: str  # Required
+    geofence_radius_meters: int = 100
 
 class ShopWiFi(BaseModel):
     id: int
     shop_id: int
     wifi_ssid: str
+    shop_latitude: str
+    shop_longitude: str
+    geofence_radius_meters: int
     is_active: bool
     created_at: datetime
+    
+    @field_serializer('created_at')
+    def serialize_dt(self, dt: datetime, _info):
+        return dt.isoformat() + 'Z' if dt else None
     
     class Config:
         from_attributes = True
@@ -46,20 +51,19 @@ class StaffDevice(BaseModel):
     registered_at: datetime
     last_seen: Optional[datetime]
     
+    @field_serializer('registered_at', 'last_seen')
+    def serialize_dt(self, dt: Optional[datetime], _info):
+        return dt.isoformat() + 'Z' if dt else None
+    
     class Config:
         from_attributes = True
 
 # Attendance Schemas
-class WiFiCheckIn(BaseModel):
-    mac_address: str
+class WiFiHeartbeat(BaseModel):
     wifi_ssid: str
-
-class ManualCheckIn(BaseModel):
-    staff_id: int
-    notes: Optional[str] = None
-
-class CheckOut(BaseModel):
-    notes: Optional[str] = None
+    mac_address: Optional[str] = None
+    latitude: float  # Required
+    longitude: float  # Required
 
 class AttendanceRecord(BaseModel):
     id: int
@@ -72,9 +76,14 @@ class AttendanceRecord(BaseModel):
     is_late: bool
     late_by_minutes: int
     total_hours: Optional[int]
+    total_break_minutes: int
     auto_checked_in: bool
     auto_checked_out: bool
     notes: Optional[str]
+    
+    @field_serializer('check_in_time', 'check_out_time')
+    def serialize_dt(self, dt: Optional[datetime], _info):
+        return dt.isoformat() + 'Z' if dt else None
     
     class Config:
         from_attributes = True
@@ -88,8 +97,8 @@ class AttendanceSettingsUpdate(BaseModel):
     work_start_time: Optional[time] = None
     work_end_time: Optional[time] = None
     grace_period_minutes: Optional[int] = None
-    auto_checkout_enabled: Optional[bool] = None
-    auto_checkout_time: Optional[time] = None
+    allow_any_network: Optional[bool] = None
+    require_wifi_for_modules: Optional[bool] = None
     monday: Optional[bool] = None
     tuesday: Optional[bool] = None
     wednesday: Optional[bool] = None
@@ -104,8 +113,8 @@ class AttendanceSettings(BaseModel):
     work_start_time: time
     work_end_time: time
     grace_period_minutes: int
-    auto_checkout_enabled: bool
-    auto_checkout_time: time
+    allow_any_network: bool
+    require_wifi_for_modules: bool
     monday: bool
     tuesday: bool
     wednesday: bool
@@ -155,6 +164,10 @@ class LeaveRequest(BaseModel):
     approved_at: Optional[datetime]
     rejection_reason: Optional[str]
     created_at: datetime
+    
+    @field_serializer('approved_at', 'created_at')
+    def serialize_dt(self, dt: Optional[datetime], _info):
+        return dt.isoformat() + 'Z' if dt else None
     
     class Config:
         from_attributes = True

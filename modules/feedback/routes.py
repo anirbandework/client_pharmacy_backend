@@ -24,8 +24,9 @@ def submit_staff_feedback(
     staff = user_dict["user"]
     shop = staff.shop
     
-    # Get admin info
-    admin = db.query(Admin).filter(Admin.id == shop.admin_id).first()
+    
+    # Get admin info using organization_id
+    admin = db.query(Admin).filter(Admin.organization_id == shop.organization_id).first()
     
     db_feedback = models.Feedback(
         user_type="staff",

@@ -1,7 +1,10 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 import os
+from datetime import datetime
 
 # Load environment variables
 load_dotenv()
@@ -19,6 +22,8 @@ from modules.billing.routes import router as billing_router
 from modules.billing.daily_records_routes import router as billing_daily_records_router
 from modules.billing.analytics_routes import router as billing_analytics_router
 from modules.auth.middleware import ShopContextMiddleware
+from modules.auth.attendance.wifi_middleware import WiFiEnforcementMiddleware
+from modules.auth.attendance.scheduler import start_scheduler, shutdown_scheduler
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.core.config import settings
 from app.database.database import engine, Base
@@ -45,10 +50,23 @@ from modules.feedback.models import Feedback
 # Create all tables
 Base.metadata.create_all(bind=engine)
 
+# Custom JSON encoder to append 'Z' to datetime strings
+class CustomJSONResponse(JSONResponse):
+    def render(self, content) -> bytes:
+        return super().render(
+            jsonable_encoder(
+                content,
+                custom_encoder={
+                    datetime: lambda v: v.isoformat() + 'Z' if v else None
+                }
+            )
+        )
+
 app = FastAPI(
     title="Pharmacy Management System",
     description="Modular microservice for pharmacy operations",
-    version="2.0.0"
+    version="2.0.0",
+    default_response_class=CustomJSONResponse
 )
 
 # CORS Configuration
@@ -73,6 +91,9 @@ app.add_middleware(
 # Shop context middleware
 app.add_middleware(ShopContextMiddleware)
 
+# WiFi enforcement middleware (must be after auth middleware)
+app.add_middleware(WiFiEnforcementMiddleware)
+
 # Rate limiting middleware
 app.add_middleware(RateLimitMiddleware)
 
@@ -89,6 +110,13 @@ app.include_router(billing_router, prefix="/api/billing", tags=["Billing System"
 app.include_router(billing_daily_records_router, prefix="/api/billing", tags=["Daily Records"])
 app.include_router(billing_analytics_router, prefix="/api/billing", tags=["Analytics"])
 app.include_router(profit_router, prefix="/api/profit", tags=["Profit Analysis"])
+
+# Start attendance scheduler for stale session detection
+start_scheduler()
+
+@app.on_event("shutdown")
+def shutdown_event():
+    shutdown_scheduler()
 
 @app.get("/")
 async def root():

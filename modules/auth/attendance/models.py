@@ -8,9 +8,12 @@ class ShopWiFi(Base):
     __tablename__ = "shop_wifi"
     
     id = Column(Integer, primary_key=True, index=True)
-    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False)
+    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False, index=True)
     wifi_ssid = Column(String(100), nullable=False)
     wifi_password = Column(String(255), nullable=True)  # Optional, for staff reference
+    shop_latitude = Column(String(20), nullable=True)  # Shop location for geofencing
+    shop_longitude = Column(String(20), nullable=True)
+    geofence_radius_meters = Column(Integer, default=100)  # Default 100m radius
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     
@@ -22,7 +25,8 @@ class StaffDevice(Base):
     __tablename__ = "staff_devices"
     
     id = Column(Integer, primary_key=True, index=True)
-    staff_id = Column(Integer, ForeignKey("staff.id"), nullable=False)
+    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False, index=True)
+    staff_id = Column(Integer, ForeignKey("staff.id"), nullable=False, index=True)
     mac_address = Column(String(17), unique=True, index=True, nullable=False)  # Format: AA:BB:CC:DD:EE:FF
     device_name = Column(String(100), nullable=True)  # e.g., "iPhone 12", "Samsung Galaxy"
     is_active = Column(Boolean, default=True)
@@ -37,8 +41,8 @@ class AttendanceRecord(Base):
     __tablename__ = "attendance_records"
     
     id = Column(Integer, primary_key=True, index=True)
-    staff_id = Column(Integer, ForeignKey("staff.id"), nullable=False)
-    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False)
+    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False, index=True)
+    staff_id = Column(Integer, ForeignKey("staff.id"), nullable=False, index=True)
     device_id = Column(Integer, ForeignKey("staff_devices.id"), nullable=True)
     wifi_id = Column(Integer, ForeignKey("shop_wifi.id"), nullable=True)
     
@@ -53,6 +57,8 @@ class AttendanceRecord(Base):
     
     # Work hours
     total_hours = Column(Integer, nullable=True)  # In minutes
+    total_break_minutes = Column(Integer, default=0)  # Total break time in minutes
+    last_error = Column(String(500), nullable=True)  # Last heartbeat error
     
     # Auto-detection info
     auto_checked_in = Column(Boolean, default=True)  # WiFi auto-detected
@@ -74,7 +80,7 @@ class AttendanceSettings(Base):
     __tablename__ = "attendance_settings"
     
     id = Column(Integer, primary_key=True, index=True)
-    shop_id = Column(Integer, ForeignKey("shops.id"), unique=True, nullable=False)
+    shop_id = Column(Integer, ForeignKey("shops.id"), unique=True, nullable=False, index=True)
     
     # Work timings
     work_start_time = Column(Time, default=datetime.strptime("09:00", "%H:%M").time())
@@ -84,6 +90,10 @@ class AttendanceSettings(Base):
     # Auto check-out
     auto_checkout_enabled = Column(Boolean, default=True)
     auto_checkout_time = Column(Time, default=datetime.strptime("19:00", "%H:%M").time())
+    
+    # WiFi enforcement
+    allow_any_network = Column(Boolean, default=False)  # Emergency toggle by admin
+    require_wifi_for_modules = Column(Boolean, default=True)  # Enforce WiFi for stock_audit, billing, etc.
     
     # Working days
     monday = Column(Boolean, default=True)
@@ -104,7 +114,8 @@ class LeaveRequest(Base):
     __tablename__ = "leave_requests"
     
     id = Column(Integer, primary_key=True, index=True)
-    staff_id = Column(Integer, ForeignKey("staff.id"), nullable=False)
+    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False, index=True)
+    staff_id = Column(Integer, ForeignKey("staff.id"), nullable=False, index=True)
     
     leave_type = Column(String(20), nullable=False)  # sick, casual, earned
     from_date = Column(Date, nullable=False)
