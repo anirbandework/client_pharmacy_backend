@@ -27,8 +27,8 @@ def seed_superadmins():
         else:
             print(f"⚠️  SuperAdmin 1 already exists: {phone1}")
         
-        # SuperAdmin 2: +917085144096
-        phone2 = "+917085144096"
+        # SuperAdmin 2: +919643579321
+        phone2 = "+919643579321"
         existing2 = db.query(SuperAdmin).filter(SuperAdmin.phone == phone2).first()
         
         if not existing2:

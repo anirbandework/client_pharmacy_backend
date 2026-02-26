@@ -16,7 +16,7 @@ Two SuperAdmins are automatically created on first deployment:
    - Password: test@123
 
 2. **SuperAdmin 2**
-   - Phone: +917085144096
+   - Phone: +919643579321
    - Password: test@123
 
 ## 🚀 Deployment Steps
