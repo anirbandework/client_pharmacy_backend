@@ -50,6 +50,15 @@ from modules.feedback.models import Feedback
 # Create all tables
 Base.metadata.create_all(bind=engine)
 
+# Seed SuperAdmins on startup (production only)
+import os
+if os.getenv('ENVIRONMENT') == 'production':
+    from seed_superadmins import seed_superadmins
+    try:
+        seed_superadmins()
+    except Exception as e:
+        print(f"Warning: Could not seed SuperAdmins: {e}")
+
 # Custom JSON encoder to append 'Z' to datetime strings
 class CustomJSONResponse(JSONResponse):
     def render(self, content) -> bytes:

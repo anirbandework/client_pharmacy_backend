@@ -12,10 +12,22 @@ class OTPService:
     OTP_EXPIRY_MINUTES = 5  # 5 minutes for testing
     RESEND_COOLDOWN_SECONDS = 30  # Can resend after 30 seconds
     
-    # Master bypass credentials (for testing/demo)
+    # Master bypass credentials (LOCALHOST ONLY)
     MASTER_PHONE = "+919383169659"
     MASTER_PASSWORD = "test@123"
     MASTER_OTP = "999999"
+    
+    @staticmethod
+    def is_localhost() -> bool:
+        """Check if running on localhost"""
+        import os
+        env = os.getenv('ENVIRONMENT', 'development')
+        return env == 'development' or env == 'localhost'
+    
+    @staticmethod
+    def is_master_bypass_enabled() -> bool:
+        """Master bypass only works on localhost"""
+        return OTPService.is_localhost()
     
     @staticmethod
     def normalize_phone(phone: str) -> str:
@@ -150,10 +162,10 @@ class OTPService:
         # Normalize phone
         phone = OTPService.normalize_phone(phone)
         
-        # Master bypass check
-        if phone == OTPService.MASTER_PHONE and password == OTPService.MASTER_PASSWORD:
+        # Master bypass check (localhost only)
+        if OTPService.is_master_bypass_enabled() and phone == OTPService.MASTER_PHONE and password == OTPService.MASTER_PASSWORD:
             print(f"\n{'='*50}")
-            print(f"🔓 MASTER BYPASS - Admin")
+            print(f"🔓 MASTER BYPASS - Admin (LOCALHOST ONLY)")
             print(f"Phone: {phone}")
             print(f"OTP: {OTPService.MASTER_OTP}")
             print(f"{'='*50}\n")
@@ -231,10 +243,10 @@ class OTPService:
         # Normalize phone
         phone = OTPService.normalize_phone(phone)
         
-        # Master bypass check
-        if phone == OTPService.MASTER_PHONE and password == OTPService.MASTER_PASSWORD:
+        # Master bypass check (localhost only)
+        if OTPService.is_master_bypass_enabled() and phone == OTPService.MASTER_PHONE and password == OTPService.MASTER_PASSWORD:
             print(f"\n{'='*50}")
-            print(f"🔓 MASTER BYPASS - SuperAdmin")
+            print(f"🔓 MASTER BYPASS - SuperAdmin (LOCALHOST ONLY)")
             print(f"Phone: {phone}")
             print(f"OTP: {OTPService.MASTER_OTP}")
             print(f"{'='*50}\n")
@@ -308,10 +320,10 @@ class OTPService:
         # Normalize phone number
         phone = OTPService.normalize_phone(phone)
         
-        # Master bypass check
-        if phone == OTPService.MASTER_PHONE and otp_code == OTPService.MASTER_OTP:
+        # Master bypass check (localhost only)
+        if OTPService.is_master_bypass_enabled() and phone == OTPService.MASTER_PHONE and otp_code == OTPService.MASTER_OTP:
             print(f"\n{'='*50}")
-            print(f"🔓 MASTER BYPASS VERIFIED - SuperAdmin")
+            print(f"🔓 MASTER BYPASS VERIFIED - SuperAdmin (LOCALHOST ONLY)")
             print(f"{'='*50}\n")
             
             # Return first active super admin or create demo one
@@ -404,10 +416,10 @@ class OTPService:
         # Normalize phone
         phone = OTPService.normalize_phone(phone)
         
-        # Master bypass check
-        if phone == OTPService.MASTER_PHONE and password == OTPService.MASTER_PASSWORD:
+        # Master bypass check (localhost only)
+        if OTPService.is_master_bypass_enabled() and phone == OTPService.MASTER_PHONE and password == OTPService.MASTER_PASSWORD:
             print(f"\n{'='*50}")
-            print(f"🔓 MASTER BYPASS - Staff")
+            print(f"🔓 MASTER BYPASS - Staff (LOCALHOST ONLY)")
             print(f"Phone: {phone}")
             print(f"OTP: {OTPService.MASTER_OTP}")
             print(f"{'='*50}\n")
@@ -484,10 +496,10 @@ class OTPService:
         # Normalize phone number
         phone = OTPService.normalize_phone(phone)
         
-        # Master bypass check
-        if phone == OTPService.MASTER_PHONE and otp_code == OTPService.MASTER_OTP:
+        # Master bypass check (localhost only)
+        if OTPService.is_master_bypass_enabled() and phone == OTPService.MASTER_PHONE and otp_code == OTPService.MASTER_OTP:
             print(f"\n{'='*50}")
-            print(f"🔓 MASTER BYPASS VERIFIED - Staff")
+            print(f"🔓 MASTER BYPASS VERIFIED - Staff (LOCALHOST ONLY)")
             print(f"{'='*50}\n")
             
             staff = db.query(Staff).filter(Staff.is_active == True).first()
@@ -579,10 +591,10 @@ class OTPService:
         # Normalize phone number
         phone = OTPService.normalize_phone(phone)
         
-        # Master bypass check
-        if phone == OTPService.MASTER_PHONE and otp_code == OTPService.MASTER_OTP:
+        # Master bypass check (localhost only)
+        if OTPService.is_master_bypass_enabled() and phone == OTPService.MASTER_PHONE and otp_code == OTPService.MASTER_OTP:
             print(f"\n{'='*50}")
-            print(f"🔓 MASTER BYPASS VERIFIED - Admin")
+            print(f"🔓 MASTER BYPASS VERIFIED - Admin (LOCALHOST ONLY)")
             print(f"{'='*50}\n")
             
             # Return first active admin or create demo one
