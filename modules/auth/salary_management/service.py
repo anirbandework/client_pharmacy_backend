@@ -10,13 +10,14 @@ import uuid
 class SalaryService:
     
     @staticmethod
-    def create_salary_record(db: Session, salary_data: schemas.SalaryRecordCreate) -> models.SalaryRecord:
+    def create_salary_record(db: Session, salary_data: schemas.SalaryRecordCreate, shop_id: int) -> models.SalaryRecord:
         """Create a new salary record"""
         
         # Check if record already exists for this month/year
         existing = db.query(models.SalaryRecord).filter(
             and_(
                 models.SalaryRecord.staff_id == salary_data.staff_id,
+                models.SalaryRecord.shop_id == shop_id,
                 models.SalaryRecord.month == salary_data.month,
                 models.SalaryRecord.year == salary_data.year
             )
@@ -26,7 +27,7 @@ class SalaryService:
             raise ValueError(f"Salary record already exists for {salary_data.month}/{salary_data.year}")
         
         # Create record
-        db_record = models.SalaryRecord(**salary_data.model_dump())
+        db_record = models.SalaryRecord(**salary_data.model_dump(), shop_id=shop_id)
         
         # Set status based on due date
         if db_record.due_date < date.today():
@@ -42,10 +43,13 @@ class SalaryService:
         return db_record
     
     @staticmethod
-    def pay_salary(db: Session, record_id: int, payment_data: schemas.SalaryPayment) -> models.SalaryRecord:
+    def pay_salary(db: Session, record_id: int, payment_data: schemas.SalaryPayment, shop_id: int) -> models.SalaryRecord:
         """Mark salary as paid"""
         
-        record = db.query(models.SalaryRecord).filter(models.SalaryRecord.id == record_id).first()
+        record = db.query(models.SalaryRecord).filter(
+            models.SalaryRecord.id == record_id,
+            models.SalaryRecord.shop_id == shop_id
+        ).first()
         if not record:
             raise ValueError("Salary record not found")
         
@@ -70,21 +74,26 @@ class SalaryService:
         return record
     
     @staticmethod
-    def get_staff_salary_profile(db: Session, staff_id: int) -> schemas.StaffSalaryProfile:
+    def get_staff_salary_profile(db: Session, staff_id: int, shop_id: int) -> schemas.StaffSalaryProfile:
         """Get complete salary profile for staff"""
         
-        staff = db.query(Staff).filter(Staff.id == staff_id).first()
+        staff = db.query(Staff).filter(
+            Staff.id == staff_id,
+            Staff.shop_id == shop_id
+        ).first()
         if not staff:
             raise ValueError("Staff not found")
         
         # Get payment info
         payment_info = db.query(models.StaffPaymentInfo).filter(
-            models.StaffPaymentInfo.staff_id == staff_id
+            models.StaffPaymentInfo.staff_id == staff_id,
+            models.StaffPaymentInfo.shop_id == shop_id
         ).first()
         
         # Get salary statistics
         records = db.query(models.SalaryRecord).filter(
-            models.SalaryRecord.staff_id == staff_id
+            models.SalaryRecord.staff_id == staff_id,
+            models.SalaryRecord.shop_id == shop_id
         ).all()
         
         pending_months = len([r for r in records if r.payment_status == models.PaymentStatus.PENDING.value])
@@ -95,6 +104,7 @@ class SalaryService:
         last_payment = db.query(models.SalaryRecord).filter(
             and_(
                 models.SalaryRecord.staff_id == staff_id,
+                models.SalaryRecord.shop_id == shop_id,
                 models.SalaryRecord.payment_status == models.PaymentStatus.PAID.value
             )
         ).order_by(models.SalaryRecord.payment_date.desc()).first()
@@ -102,6 +112,7 @@ class SalaryService:
         next_due = db.query(models.SalaryRecord).filter(
             and_(
                 models.SalaryRecord.staff_id == staff_id,
+                models.SalaryRecord.shop_id == shop_id,
                 models.SalaryRecord.payment_status.in_([
                     models.PaymentStatus.PENDING.value,
                     models.PaymentStatus.OVERDUE.value
@@ -130,17 +141,19 @@ class SalaryService:
         )
     
     @staticmethod
-    def get_salary_dashboard(db: Session) -> schemas.SalaryDashboard:
+    def get_salary_dashboard(db: Session, shop_id: int) -> schemas.SalaryDashboard:
         """Get admin dashboard with salary overview"""
         
-        total_staff = db.query(Staff).count()
+        total_staff = db.query(Staff).filter(Staff.shop_id == shop_id).count()
         
         # Count pending and overdue payments
         pending_count = db.query(models.SalaryRecord).filter(
+            models.SalaryRecord.shop_id == shop_id,
             models.SalaryRecord.payment_status == models.PaymentStatus.PENDING.value
         ).count()
         
         overdue_count = db.query(models.SalaryRecord).filter(
+            models.SalaryRecord.shop_id == shop_id,
             models.SalaryRecord.payment_status == models.PaymentStatus.OVERDUE.value
         ).count()
         
@@ -148,6 +161,7 @@ class SalaryService:
         upcoming_date = date.today() + timedelta(days=5)
         upcoming_count = db.query(models.SalaryRecord).filter(
             and_(
+                models.SalaryRecord.shop_id == shop_id,
                 models.SalaryRecord.payment_status == models.PaymentStatus.PENDING.value,
                 models.SalaryRecord.due_date <= upcoming_date,
                 models.SalaryRecord.due_date >= date.today()
@@ -156,15 +170,17 @@ class SalaryService:
         
         # Calculate amounts
         pending_amount = db.query(func.sum(models.SalaryRecord.salary_amount)).filter(
+            models.SalaryRecord.shop_id == shop_id,
             models.SalaryRecord.payment_status == models.PaymentStatus.PENDING.value
         ).scalar() or 0
         
         overdue_amount = db.query(func.sum(models.SalaryRecord.salary_amount)).filter(
+            models.SalaryRecord.shop_id == shop_id,
             models.SalaryRecord.payment_status == models.PaymentStatus.OVERDUE.value
         ).scalar() or 0
         
         # Get active alerts
-        alerts = SalaryService.get_active_alerts(db)
+        alerts = SalaryService.get_active_alerts(db, shop_id)
         
         return schemas.SalaryDashboard(
             total_staff=total_staff,
@@ -177,7 +193,7 @@ class SalaryService:
         )
     
     @staticmethod
-    def get_active_alerts(db: Session) -> List[schemas.SalaryAlert]:
+    def get_active_alerts(db: Session, shop_id: int) -> List[schemas.SalaryAlert]:
         """Get all active salary alerts"""
         
         alerts = db.query(
@@ -191,6 +207,7 @@ class SalaryService:
         ).join(
             models.SalaryRecord, models.SalaryAlert.salary_record_id == models.SalaryRecord.id
         ).filter(
+            models.SalaryAlert.shop_id == shop_id,
             models.SalaryAlert.is_dismissed == False
         ).order_by(models.SalaryAlert.alert_date.asc()).all()
         
@@ -212,11 +229,12 @@ class SalaryService:
         ]
     
     @staticmethod
-    def update_overdue_status(db: Session):
+    def update_overdue_status(db: Session, shop_id: int):
         """Update overdue status for pending payments"""
         
         db.query(models.SalaryRecord).filter(
             and_(
+                models.SalaryRecord.shop_id == shop_id,
                 models.SalaryRecord.payment_status == models.PaymentStatus.PENDING.value,
                 models.SalaryRecord.due_date < date.today()
             )
@@ -233,6 +251,7 @@ class SalaryService:
         if alert_date >= date.today():
             alert = models.SalaryAlert(
                 staff_id=record.staff_id,
+                shop_id=record.shop_id,
                 salary_record_id=record.id,
                 alert_type="upcoming",
                 alert_date=alert_date
@@ -243,6 +262,7 @@ class SalaryService:
         if record.due_date < date.today():
             alert = models.SalaryAlert(
                 staff_id=record.staff_id,
+                shop_id=record.shop_id,
                 salary_record_id=record.id,
                 alert_type="overdue",
                 alert_date=date.today()
@@ -259,15 +279,16 @@ class SalaryService:
 class PaymentInfoService:
     
     @staticmethod
-    def update_payment_info(db: Session, staff_id: int, payment_data: schemas.StaffPaymentInfoUpdate) -> models.StaffPaymentInfo:
+    def update_payment_info(db: Session, staff_id: int, payment_data: schemas.StaffPaymentInfoUpdate, shop_id: int) -> models.StaffPaymentInfo:
         """Update staff payment information"""
         
         payment_info = db.query(models.StaffPaymentInfo).filter(
-            models.StaffPaymentInfo.staff_id == staff_id
+            models.StaffPaymentInfo.staff_id == staff_id,
+            models.StaffPaymentInfo.shop_id == shop_id
         ).first()
         
         if not payment_info:
-            payment_info = models.StaffPaymentInfo(staff_id=staff_id)
+            payment_info = models.StaffPaymentInfo(staff_id=staff_id, shop_id=shop_id)
             db.add(payment_info)
         
         # Update fields
@@ -281,7 +302,7 @@ class PaymentInfoService:
         return payment_info
     
     @staticmethod
-    def upload_qr_code(db: Session, staff_id: int, file_content: bytes, filename: str) -> str:
+    def upload_qr_code(db: Session, staff_id: int, file_content: bytes, filename: str, shop_id: int) -> str:
         """Upload and save QR code image"""
         
         # Create uploads directory if not exists
@@ -299,11 +320,12 @@ class PaymentInfoService:
         
         # Update payment info
         payment_info = db.query(models.StaffPaymentInfo).filter(
-            models.StaffPaymentInfo.staff_id == staff_id
+            models.StaffPaymentInfo.staff_id == staff_id,
+            models.StaffPaymentInfo.shop_id == shop_id
         ).first()
         
         if not payment_info:
-            payment_info = models.StaffPaymentInfo(staff_id=staff_id)
+            payment_info = models.StaffPaymentInfo(staff_id=staff_id, shop_id=shop_id)
             db.add(payment_info)
         
         payment_info.qr_code_path = file_path

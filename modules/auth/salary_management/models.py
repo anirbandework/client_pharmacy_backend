@@ -13,6 +13,7 @@ class SalaryRecord(Base):
     __tablename__ = "salary_records"
     
     id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False, index=True)
     staff_id = Column(Integer, ForeignKey("staff.id"), nullable=False)
     month = Column(Integer, nullable=False)  # 1-12
     year = Column(Integer, nullable=False)
@@ -32,6 +33,7 @@ class StaffPaymentInfo(Base):
     __tablename__ = "staff_payment_info"
     
     id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False, index=True)
     staff_id = Column(Integer, ForeignKey("staff.id"), unique=True, nullable=False)
     upi_id = Column(String(100), nullable=True)
     qr_code_path = Column(String(255), nullable=True)
@@ -49,6 +51,7 @@ class SalaryAlert(Base):
     __tablename__ = "salary_alerts"
     
     id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False, index=True)
     staff_id = Column(Integer, ForeignKey("staff.id"), nullable=False)
     salary_record_id = Column(Integer, ForeignKey("salary_records.id"), nullable=False)
     alert_type = Column(String(20), nullable=False)  # upcoming, overdue
