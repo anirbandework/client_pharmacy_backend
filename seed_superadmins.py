@@ -10,6 +10,12 @@ def seed_superadmins():
     db = SessionLocal()
     
     try:
+        # Deactivate old SuperAdmin 2 (7085144096)
+        old_admin = db.query(SuperAdmin).filter(SuperAdmin.phone == "+917085144096").first()
+        if old_admin:
+            old_admin.is_active = False
+            print(f"🔒 Deactivated old SuperAdmin: +917085144096")
+        
         # SuperAdmin 1: +919383169659
         phone1 = "+919383169659"
         existing1 = db.query(SuperAdmin).filter(SuperAdmin.phone == phone1).first()
@@ -33,7 +39,7 @@ def seed_superadmins():
         
         if not existing2:
             super_admin2 = SuperAdmin(
-                email="admin2@xpertpharma.com",
+                email="admin9321@xpertpharma.com",
                 phone=phone2,
                 password_hash=AuthService.hash_password("test@123"),
                 full_name="Super Admin 2",
