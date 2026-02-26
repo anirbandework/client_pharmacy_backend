@@ -294,6 +294,34 @@ def get_dashboard(
     
     return dashboard_data
 
+@router.get("/super-admin/organizations")
+def get_organizations(
+    super_admin: models.SuperAdmin = Depends(get_current_super_admin),
+    db: Session = Depends(get_db)
+):
+    """Get list of all organizations with summary data"""
+    organizations = db.query(models.Admin.organization_id).distinct().all()
+    org_list = []
+    
+    for (org_id,) in organizations:
+        org_admins = db.query(models.Admin).filter(models.Admin.organization_id == org_id).all()
+        org_shops = db.query(models.Shop).filter(models.Shop.organization_id == org_id).all()
+        shop_ids = [shop.id for shop in org_shops]
+        org_staff = db.query(models.Staff).filter(models.Staff.shop_id.in_(shop_ids)).all() if shop_ids else []
+        
+        # Get first admin's name as organization name
+        org_name = org_admins[0].full_name if org_admins else org_id
+        
+        org_list.append({
+            "id": org_id,
+            "name": org_name,
+            "admins_count": len(org_admins),
+            "shops_count": len(org_shops),
+            "staff_count": len(org_staff)
+        })
+    
+    return {"organizations": org_list}
+
 @router.put("/super-admin/shops/{shop_id}", response_model=schemas.Shop)
 def update_shop_super(
     shop_id: int,
@@ -711,6 +739,7 @@ def verify_staff_otp(request: VerifyOTPRequest, db: Session = Depends(get_db)):
         token = AuthService.create_access_token({
             "user_id": staff.id,
             "user_type": "staff",
+            "organization_id": staff.shop.organization_id,
             "shop_code": staff.shop.shop_code,
             "email": staff.email,
             "user_name": staff.name
@@ -750,6 +779,7 @@ def staff_login(login_data: schemas.StaffLogin, db: Session = Depends(get_db)):
     token = AuthService.create_access_token({
         "user_id": staff.id,
         "user_type": "staff",
+        "organization_id": staff.shop.organization_id,
         "shop_code": staff.shop.shop_code,
         "email": staff.email,
         "user_name": staff.name

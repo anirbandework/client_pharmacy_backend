@@ -16,6 +16,7 @@ from modules.profit_analysis.routes import router as profit_router
 from modules.auth.routes import router as auth_router
 from modules.auth.salary_management.routes import router as salary_router
 from modules.auth.attendance.routes import router as attendance_router
+from modules.auth.rbac.routes import router as rbac_router
 from modules.notifications.routes import router as notifications_router
 from modules.feedback.routes import router as feedback_router
 from modules.billing.routes import router as billing_router
@@ -46,6 +47,7 @@ from modules.notifications.models import (
 )
 from modules.invoice_analyzer.models import PurchaseInvoice, PurchaseInvoiceItem
 from modules.feedback.models import Feedback
+from modules.auth.rbac.models import Module, OrganizationModulePermission
 
 # Create all tables
 Base.metadata.create_all(bind=engine)
@@ -115,6 +117,7 @@ app.add_middleware(RateLimitMiddleware)
 
 # Module routes
 app.include_router(auth_router, prefix="/api/auth", tags=["Authentication"])
+app.include_router(rbac_router, prefix="/api/rbac", tags=["RBAC"])
 app.include_router(salary_router, prefix="/api/salary", tags=["Salary Management"])
 app.include_router(attendance_router, prefix="/api/attendance", tags=["Attendance System"])
 app.include_router(notifications_router, prefix="/api/notifications", tags=["Notifications"])
@@ -140,13 +143,14 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "modules": ["auth", "salary_management", "attendance", "notifications", "feedback", "customer_tracking", "purchase_invoice_analyzer", "stock_audit", "billing", "profit_analysis"]}
+    return {"status": "healthy", "modules": ["auth", "rbac", "salary_management", "attendance", "notifications", "feedback", "customer_tracking", "purchase_invoice_analyzer", "stock_audit", "billing", "profit_analysis"]}
 
 @app.get("/modules")
 async def list_modules():
     return {
         "modules": {
             "auth": "Multi-tenant authentication with admin/shop/staff hierarchy",
+            "rbac": "Role-based access control with dynamic module permissions per organization",
             "salary_management": "Staff salary management with payment tracking, QR codes, and automated alerts",
             "attendance": "WiFi-based automatic attendance tracking with real-time monitoring and leave management",
             "notifications": "Admin-to-staff notification system with shop-level and direct messaging",
