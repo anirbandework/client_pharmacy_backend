@@ -52,10 +52,17 @@ Base.metadata.create_all(bind=engine)
 
 # Seed SuperAdmins on startup (production only)
 import os
+import sys
+import importlib.util
+
 if os.getenv('ENVIRONMENT') == 'production':
-    from seed_superadmins import seed_superadmins
     try:
-        seed_superadmins()
+        # Load seed_superadmins module dynamically
+        seed_path = os.path.join(os.path.dirname(__file__), 'super-admin', 'seed_superadmins.py')
+        spec = importlib.util.spec_from_file_location("seed_superadmins", seed_path)
+        seed_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(seed_module)
+        seed_module.seed_superadmins()
     except Exception as e:
         print(f"Warning: Could not seed SuperAdmins: {e}")
 

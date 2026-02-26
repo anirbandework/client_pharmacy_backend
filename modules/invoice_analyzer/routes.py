@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from app.database.database import get_db
 from .dependencies import get_current_user_with_geofence as get_current_user
+from modules.auth.models import Staff
 from typing import List, Optional
 from datetime import datetime, date
 import os

@@ -1,6 +1,11 @@
 """
 Seed SuperAdmins for Production
-Run this script once during deployment to create the 2 SuperAdmins
+
+IMPORTANT: Run this script from the project root directory:
+  cd /Users/anirbande/Desktop/client\ backend
+  python super-admin/seed_superadmins.py
+
+This script creates 2 SuperAdmins for production use.
 """
 from app.database.database import SessionLocal
 from modules.auth.models import SuperAdmin

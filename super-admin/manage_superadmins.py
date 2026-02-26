@@ -1,12 +1,17 @@
 """
 SuperAdmin Management Script
+
+IMPORTANT: Run this script from the project root directory:
+  cd /Users/anirbande/Desktop/client\ backend
+  python super-admin/manage_superadmins.py list
+
 Usage:
-  python manage_superadmins.py list
-  python manage_superadmins.py add +91XXXXXXXXXX "password" "Full Name"
-  python manage_superadmins.py deactivate +91XXXXXXXXXX
-  python manage_superadmins.py activate +91XXXXXXXXXX
-  python manage_superadmins.py delete +91XXXXXXXXXX
-  python manage_superadmins.py reset-password +91XXXXXXXXXX "new_password"
+  python super-admin/manage_superadmins.py list
+  python super-admin/manage_superadmins.py add +91XXXXXXXXXX "password" "Full Name"
+  python super-admin/manage_superadmins.py deactivate +91XXXXXXXXXX
+  python super-admin/manage_superadmins.py activate +91XXXXXXXXXX
+  python super-admin/manage_superadmins.py delete +91XXXXXXXXXX
+  python super-admin/manage_superadmins.py reset-password +91XXXXXXXXXX "new_password"
 """
 import sys
 from app.database.database import SessionLocal
@@ -135,31 +140,31 @@ if __name__ == "__main__":
     
     elif command == "add":
         if len(sys.argv) != 5:
-            print("Usage: python manage_superadmins.py add +91XXXXXXXXXX 'password' 'Full Name'")
+            print("Usage: python super-admin/manage_superadmins.py add +91XXXXXXXXXX 'password' 'Full Name'")
             sys.exit(1)
         add_superadmin(sys.argv[2], sys.argv[3], sys.argv[4])
     
     elif command == "deactivate":
         if len(sys.argv) != 3:
-            print("Usage: python manage_superadmins.py deactivate +91XXXXXXXXXX")
+            print("Usage: python super-admin/manage_superadmins.py deactivate +91XXXXXXXXXX")
             sys.exit(1)
         deactivate_superadmin(sys.argv[2])
     
     elif command == "activate":
         if len(sys.argv) != 3:
-            print("Usage: python manage_superadmins.py activate +91XXXXXXXXXX")
+            print("Usage: python super-admin/manage_superadmins.py activate +91XXXXXXXXXX")
             sys.exit(1)
         activate_superadmin(sys.argv[2])
     
     elif command == "delete":
         if len(sys.argv) != 3:
-            print("Usage: python manage_superadmins.py delete +91XXXXXXXXXX")
+            print("Usage: python super-admin/manage_superadmins.py delete +91XXXXXXXXXX")
             sys.exit(1)
         delete_superadmin(sys.argv[2])
     
     elif command == "reset-password":
         if len(sys.argv) != 4:
-            print("Usage: python manage_superadmins.py reset-password +91XXXXXXXXXX 'new_password'")
+            print("Usage: python super-admin/manage_superadmins.py reset-password +91XXXXXXXXXX 'new_password'")
             sys.exit(1)
         reset_password(sys.argv[2], sys.argv[3])
     

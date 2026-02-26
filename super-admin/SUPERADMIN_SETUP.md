@@ -31,9 +31,10 @@ ENVIRONMENT=production
 SuperAdmins are automatically created on first startup when `ENVIRONMENT=production`.
 
 ### 3. Manual Seeding (Optional)
-If automatic seeding fails, run manually:
+If automatic seeding fails, run manually from project root:
 ```bash
-python seed_superadmins.py
+cd /Users/anirbande/Desktop/client\ backend
+python super-admin/seed_superadmins.py
 ```
 
 ## 📱 Login Flow
@@ -77,18 +78,27 @@ REDIS_URL=redis://localhost:6379
 3. **SMS Required** - Production requires valid Fast2SMS API key for OTP delivery
 4. **Token Expiry** - JWT tokens expire after 24 hours
 
-## 🔄 Password Reset
+## 🔧 Manual Management
 
-To reset SuperAdmin password:
-```python
-from app.database.database import SessionLocal
-from modules.auth.models import SuperAdmin
-from modules.auth.service import AuthService
+### List SuperAdmins
+```bash
+cd /Users/anirbande/Desktop/client\ backend
+python super-admin/manage_superadmins.py list
+```
 
-db = SessionLocal()
-admin = db.query(SuperAdmin).filter(SuperAdmin.phone == "+919383169659").first()
-admin.password_hash = AuthService.hash_password("new_password")
-db.commit()
+### Add New SuperAdmin
+```bash
+python super-admin/manage_superadmins.py add +91XXXXXXXXXX "password" "Full Name"
+```
+
+### Reset Password
+```bash
+python super-admin/manage_superadmins.py reset-password +91XXXXXXXXXX "new_password"
+```
+
+### Manual Seeding
+```bash
+python super-admin/seed_superadmins.py
 ```
 
 ## 📊 Verification
