@@ -335,7 +335,7 @@ def assign_section_to_item(
         raise HTTPException(status_code=404, detail="Stock item not found")
     
     db_item.section_id = section_id
-    db_item.updated_at = datetime.utcnow()
+    db_item.updated_at = datetime.now()
     db.commit()
     
     return {

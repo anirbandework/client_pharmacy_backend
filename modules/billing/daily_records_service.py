@@ -96,7 +96,7 @@ class DailyRecordsService:
         if "cash_reserve" in data:
             record.cash_reserve = data["cash_reserve"]
         
-        record.updated_at = datetime.utcnow()
+        record.updated_at = datetime.now()
         db.commit()
         db.refresh(record)
         

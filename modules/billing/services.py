@@ -227,7 +227,7 @@ class BillingService:
             stock_item.quantity_software -= item_data['quantity']
             if stock_item.quantity_physical is not None:
                 stock_item.audit_discrepancy = stock_item.quantity_software - stock_item.quantity_physical
-            stock_item.updated_at = datetime.utcnow()
+            stock_item.updated_at = datetime.now()
         
         db.commit()
         db.refresh(bill)
@@ -275,7 +275,7 @@ class BillingService:
         days: int = 30
     ) -> List[Dict[str, Any]]:
         """Get top selling items"""
-        cutoff_date = datetime.utcnow() - timedelta(days=days)
+        cutoff_date = datetime.now() - timedelta(days=days)
         
         results = db.query(
             BillItem.item_name,

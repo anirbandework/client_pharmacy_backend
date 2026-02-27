@@ -50,8 +50,8 @@ class PurchaseInvoice(Base):
     verified_at = Column(DateTime, nullable=True)
     
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     
     # Relationships
     items = relationship("PurchaseInvoiceItem", back_populates="invoice", cascade="all, delete-orphan")
@@ -87,7 +87,7 @@ class PurchaseInvoiceItem(Base):
     # Custom fields for shop-specific item data
     custom_fields = Column(JSON, nullable=True, default={})
     
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     
     invoice = relationship("PurchaseInvoice", back_populates="items")

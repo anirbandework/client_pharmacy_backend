@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
+from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 import os
 from datetime import datetime
@@ -167,6 +168,10 @@ app.include_router(profit_router, prefix="/api/profit", tags=["Profit Analysis"]
 
 # Start attendance scheduler for stale session detection
 start_scheduler()
+
+# Mount static files for uploads
+os.makedirs("uploads/qr_codes", exist_ok=True)
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 @app.on_event("shutdown")
 def shutdown_event():

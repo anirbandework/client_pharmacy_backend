@@ -13,7 +13,7 @@ class SuperAdmin(Base):
     full_name = Column(String, nullable=False)
     phone = Column(String(15), unique=True, index=True, nullable=False)
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
 
 class Admin(Base):
     __tablename__ = "admins"
@@ -22,13 +22,12 @@ class Admin(Base):
     organization_id = Column(String, index=True, nullable=False)  # Shared ID for multiple admins
     email = Column(String, unique=True, index=True, nullable=True)  # Optional now
     password_hash = Column(String, nullable=True)  # Nullable - set during signup
-    plain_password = Column(String, nullable=True)  # ⚠️ SECURITY RISK: Plain text password for SuperAdmin visibility
     full_name = Column(String, nullable=False)
     phone = Column(String(15), unique=True, index=True, nullable=False)  # Required for OTP
     is_active = Column(Boolean, default=True)
     is_password_set = Column(Boolean, default=False)  # Track if user completed signup
     created_by_super_admin = Column(String, nullable=False)  # SuperAdmin name who created
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
 
 class Shop(Base):
     __tablename__ = "shops"
@@ -58,7 +57,7 @@ class Shop(Base):
     updated_at = Column(DateTime, nullable=True)
     
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
     
     staff = relationship("Staff", back_populates="shop", cascade="all, delete-orphan")
 
@@ -73,7 +72,6 @@ class Staff(Base):
     staff_code = Column(String, unique=True, index=True, nullable=False)  # Added staff_code
     phone = Column(String, unique=True, index=True, nullable=False)  # Required for OTP login
     password_hash = Column(String, nullable=True)  # Nullable - set during signup
-    plain_password = Column(String, nullable=True)  # ⚠️ SECURITY RISK: Plain text password for SuperAdmin visibility
     email = Column(String, nullable=True)
     
     role = Column(String, default="staff")  # staff, shop_manager
@@ -97,7 +95,7 @@ class Staff(Base):
     updated_at = Column(DateTime, nullable=True)
     
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
     last_login = Column(DateTime, nullable=True)
     
     shop = relationship("Shop", back_populates="staff")

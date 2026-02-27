@@ -101,7 +101,7 @@ class WiFiHeartbeatService:
                 db.flush()
             
             # Update last_seen
-            device.last_seen = datetime.utcnow()
+            device.last_seen = datetime.now()
         
         # Check if already checked in today
         today = date.today()
@@ -116,7 +116,7 @@ class WiFiHeartbeatService:
             existing_record.last_error = None
             
             # Calculate break time if gap >30 minutes
-            time_since_last_heartbeat = (datetime.utcnow() - existing_record.updated_at).total_seconds() / 60
+            time_since_last_heartbeat = (datetime.now() - existing_record.updated_at).total_seconds() / 60
             if time_since_last_heartbeat > 30:
                 # Add break time
                 break_minutes = int(time_since_last_heartbeat)
@@ -129,7 +129,7 @@ class WiFiHeartbeatService:
                 existing_record.total_hours = None
             
             # Update heartbeat timestamp - force update
-            existing_record.updated_at = datetime.utcnow()
+            existing_record.updated_at = datetime.now()
             db.add(existing_record)  # Mark as modified
             db.commit()
             db.refresh(existing_record)
@@ -213,7 +213,7 @@ class WiFiHeartbeatService:
             }
         
         # Auto check-out
-        check_out_time = datetime.utcnow()
+        check_out_time = datetime.now()
         attendance.check_out_time = check_out_time
         attendance.auto_checked_out = True
         
@@ -240,7 +240,7 @@ class WiFiHeartbeatService:
         This should be run periodically (e.g., every minute via cron/scheduler).
         """
         
-        cutoff_time = datetime.utcnow() - timedelta(minutes=stale_minutes)
+        cutoff_time = datetime.now() - timedelta(minutes=stale_minutes)
         today = date.today()
         
         stale_sessions = db.query(models.AttendanceRecord).filter(
@@ -251,7 +251,7 @@ class WiFiHeartbeatService:
         
         checked_out_count = 0
         for session in stale_sessions:
-            session.check_out_time = datetime.utcnow()
+            session.check_out_time = datetime.now()
             session.auto_checked_out = True
             session.notes = f"Auto checked-out due to WiFi disconnect (no heartbeat for {stale_minutes} min)"
             

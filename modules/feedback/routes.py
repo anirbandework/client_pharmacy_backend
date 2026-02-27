@@ -137,7 +137,7 @@ def mark_feedback_as_read(
         raise HTTPException(status_code=404, detail="Feedback not found")
     
     feedback.status = "closed"
-    feedback.updated_at = datetime.utcnow()
+    feedback.updated_at = datetime.now()
     db.commit()
     
     return {"message": "Feedback marked as read"}
@@ -188,9 +188,9 @@ def respond_to_feedback(
     if update.admin_response:
         feedback.admin_response = update.admin_response
         feedback.responded_by = super_admin.full_name
-        feedback.responded_at = datetime.utcnow()
+        feedback.responded_at = datetime.now()
     
-    feedback.updated_at = datetime.utcnow()
+    feedback.updated_at = datetime.now()
     db.commit()
     db.refresh(feedback)
     return feedback

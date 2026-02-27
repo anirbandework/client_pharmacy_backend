@@ -58,8 +58,8 @@ class StockItem(Base):
     # Source tracking
     source_invoice_id = Column(Integer, ForeignKey("purchase_invoices.id"), nullable=True)
     
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     
     section = relationship("StockSection", back_populates="items")
     purchase_items = relationship("PurchaseItem", back_populates="stock_item", cascade="all, delete-orphan")
@@ -78,7 +78,7 @@ class Purchase(Base):
     supplier_name = Column(String, nullable=False)
     invoice_number = Column(String, nullable=True)
     total_amount = Column(Float, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
     
     items = relationship("PurchaseItem", back_populates="purchase", cascade="all, delete-orphan")
 
@@ -109,7 +109,7 @@ class Sale(Base):
     customer_phone = Column(String, nullable=True)
     bill_number = Column(String, nullable=True)
     total_amount = Column(Float, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
     
     items = relationship("SaleItem", back_populates="sale", cascade="all, delete-orphan")
 
@@ -138,7 +138,7 @@ class StockAuditRecord(Base):
     staff_name = Column(String, nullable=True)
     stock_item_id = Column(Integer, ForeignKey("stock_items_audit.id"))
     
-    audit_date = Column(DateTime, default=datetime.utcnow)
+    audit_date = Column(DateTime, default=datetime.now)
     software_quantity = Column(Integer, nullable=False)
     physical_quantity = Column(Integer, nullable=False)
     discrepancy = Column(Integer, nullable=False)
@@ -161,14 +161,14 @@ class StockAuditSession(Base):
     shop_id = Column(Integer, ForeignKey("shops.id"), nullable=True, index=True)
     staff_id = Column(Integer, ForeignKey("staff.id"), nullable=True, index=True)
     staff_name = Column(String, nullable=True)
-    session_date = Column(Date, default=datetime.utcnow().date)
+    session_date = Column(Date, default=datetime.now().date)
     
     sections_audited = Column(Integer, default=0)
     items_audited = Column(Integer, default=0)
     discrepancies_found = Column(Integer, default=0)
     
     status = Column(String, default="in_progress")
-    started_at = Column(DateTime, default=datetime.utcnow)
+    started_at = Column(DateTime, default=datetime.now)
     completed_at = Column(DateTime, nullable=True)
     
     session_notes = Column(Text, nullable=True)
@@ -186,6 +186,6 @@ class StockAdjustment(Base):
     quantity_change = Column(Integer, nullable=False)
     reason = Column(String, nullable=False)
     notes = Column(Text, nullable=True)
-    adjustment_date = Column(DateTime, default=datetime.utcnow)
+    adjustment_date = Column(DateTime, default=datetime.now)
     
     stock_item = relationship("StockItem", back_populates="adjustments")

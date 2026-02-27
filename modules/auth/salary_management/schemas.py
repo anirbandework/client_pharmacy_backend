@@ -73,6 +73,7 @@ class SalaryPayment(BaseModel):
 class SalaryRecord(BaseModel):
     id: int
     staff_id: int
+    staff_name: Optional[str] = None
     month: int
     year: int
     salary_amount: float

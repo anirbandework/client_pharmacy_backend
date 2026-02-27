@@ -249,7 +249,7 @@ def get_analytics(
     inactive_staff = db.query(models.Staff).filter(models.Staff.is_active == False).count()
     
     # Recent registrations (last 30 days)
-    thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+    thirty_days_ago = datetime.now() - timedelta(days=30)
     recent_admins = db.query(models.Admin).filter(models.Admin.created_at >= thirty_days_ago).count()
     recent_shops = db.query(models.Shop).filter(models.Shop.created_at >= thirty_days_ago).count()
     recent_staff = db.query(models.Staff).filter(models.Staff.created_at >= thirty_days_ago).count()
@@ -322,8 +322,7 @@ def get_dashboard(
                 "full_name": admin.full_name,
                 "phone": admin.phone,
                 "email": admin.email,
-                # "password_hash": admin.password_hash,  # Commented: Secure hash (not reversible)
-                "plain_password": admin.plain_password,  # ⚠️ INSECURE: Plain text password
+                "password_hash": admin.password_hash,
                 "is_password_set": admin.is_password_set,
                 "is_active": admin.is_active,
                 "created_at": admin.created_at
@@ -353,8 +352,7 @@ def get_dashboard(
                     "staff_code": staff.staff_code,
                     "phone": staff.phone,
                     "email": staff.email,
-                    # "password_hash": staff.password_hash,  # Commented: Secure hash (not reversible)
-                    "plain_password": staff.plain_password,  # ⚠️ INSECURE: Plain text password
+                    "password_hash": staff.password_hash,
                     "role": staff.role,
                     "is_password_set": staff.is_password_set,
                     "is_active": staff.is_active,
@@ -412,7 +410,7 @@ def update_shop_super(
         setattr(shop, key, value)
     
     shop.updated_by_admin = super_admin.full_name
-    shop.updated_at = datetime.utcnow()
+    shop.updated_at = datetime.now()
     
     db.commit()
     db.refresh(shop)
@@ -463,7 +461,7 @@ def update_staff_super(
         setattr(staff, key, value)
     
     staff.updated_by_admin = super_admin.full_name
-    staff.updated_at = datetime.utcnow()
+    staff.updated_at = datetime.now()
     
     db.commit()
     db.refresh(staff)
@@ -643,7 +641,7 @@ def update_shop(
         setattr(shop, key, value)
     
     shop.updated_by_admin = admin.full_name
-    shop.updated_at = datetime.utcnow()
+    shop.updated_at = datetime.now()
     
     db.commit()
     db.refresh(shop)
@@ -747,7 +745,7 @@ def update_staff(
         setattr(staff, key, value)
     
     staff.updated_by_admin = admin.full_name
-    staff.updated_at = datetime.utcnow()
+    staff.updated_at = datetime.now()
     
     db.commit()
     db.refresh(staff)

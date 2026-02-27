@@ -107,7 +107,7 @@ def get_wifi_status(
     if user_type == "admin":
         # Return shop-level status for admin
         today = date.today()
-        cutoff_time = datetime.utcnow() - timedelta(minutes=2)
+        cutoff_time = datetime.now() - timedelta(minutes=2)
         
         connected_count = db.query(models.AttendanceRecord).filter(
             models.AttendanceRecord.shop_id == shop_id,
@@ -158,7 +158,7 @@ def get_wifi_status(
     # Check if user is currently inside geofence (successful heartbeat within last 2 minutes)
     is_inside_geofence = False
     if attendance and attendance.updated_at:
-        time_since_last_heartbeat = (datetime.utcnow() - attendance.updated_at).total_seconds() / 60
+        time_since_last_heartbeat = (datetime.now() - attendance.updated_at).total_seconds() / 60
         # User is inside if last heartbeat was successful (no error) and within 2 minutes
         is_inside_geofence = time_since_last_heartbeat < 2 and not attendance.last_error
     
@@ -194,7 +194,7 @@ def get_connected_staff(
         raise HTTPException(status_code=403, detail="Admin access required")
     
     today = date.today()
-    cutoff_time = datetime.utcnow() - timedelta(minutes=2)  # Consider connected if heartbeat within 2 min
+    cutoff_time = datetime.now() - timedelta(minutes=2)  # Consider connected if heartbeat within 2 min
     
     # Get staff with active attendance and recent heartbeat
     connected = db.query(models.AttendanceRecord, Staff).join(Staff).filter(
@@ -214,7 +214,7 @@ def get_connected_staff(
             "check_in_time": attendance.check_in_time.isoformat() + 'Z',
             "is_late": attendance.is_late,
             "last_seen": attendance.updated_at.isoformat() + 'Z',
-            "duration_minutes": int((datetime.utcnow() - attendance.check_in_time).total_seconds() / 60)
+            "duration_minutes": int((datetime.now() - attendance.check_in_time).total_seconds() / 60)
         })
     
     return {
@@ -539,7 +539,7 @@ def update_attendance_settings(
     for field, value in settings_data.model_dump(exclude_unset=True).items():
         setattr(settings, field, value)
     
-    settings.updated_at = datetime.utcnow()
+    settings.updated_at = datetime.now()
     db.commit()
     db.refresh(settings)
     
@@ -684,7 +684,7 @@ def approve_leave(
     
     leave.status = "approved"
     leave.approved_by = user.full_name
-    leave.approved_at = datetime.utcnow()
+    leave.approved_at = datetime.now()
     
     db.commit()
     db.refresh(leave)
@@ -716,7 +716,7 @@ def reject_leave(
     
     leave.status = "rejected"
     leave.approved_by = user.full_name
-    leave.approved_at = datetime.utcnow()
+    leave.approved_at = datetime.now()
     leave.rejection_reason = update_data.rejection_reason
     
     db.commit()

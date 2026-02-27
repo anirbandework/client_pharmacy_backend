@@ -33,8 +33,8 @@ class DailyRecord(Base):
     staff_name = Column(String, nullable=True)
     
     # Audit trail
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     
     # Relationships
     expenses = relationship("DailyExpense", back_populates="daily_record", cascade="all, delete-orphan")
@@ -54,7 +54,7 @@ class DailyExpense(Base):
     staff_id = Column(Integer, ForeignKey("staff.id"), nullable=True)
     staff_name = Column(String, nullable=True)
     
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
     
     # Relationship
     daily_record = relationship("DailyRecord", back_populates="expenses")

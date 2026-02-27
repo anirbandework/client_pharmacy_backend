@@ -47,7 +47,7 @@ class Bill(Base):
     notes = Column(Text, nullable=True)
     prescription_required = Column(String, nullable=True)
     
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    created_at = Column(DateTime, default=datetime.now, index=True)
     
     items = relationship("BillItem", back_populates="bill", cascade="all, delete-orphan")
     

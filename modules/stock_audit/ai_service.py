@@ -45,7 +45,7 @@ class StockAuditAIService:
     @staticmethod
     def get_analytics_data(db: Session, shop_id: int, days: int = 30) -> Dict[str, Any]:
         """Gather stock audit analytics data"""
-        cutoff_date = datetime.utcnow() - timedelta(days=days)
+        cutoff_date = datetime.now() - timedelta(days=days)
         
         # Audit records
         audit_records = db.query(StockAuditRecord).filter(
@@ -238,7 +238,7 @@ Format as JSON with keys: findings, risks, recommendations, predictions
                 },
                 "charts": charts,
                 "ai_insights": insights,
-                "generated_at": datetime.utcnow().isoformat()
+                "generated_at": datetime.now().isoformat()
             }
         except Exception as e:
             logger.error(f"Error in comprehensive analysis: {e}")

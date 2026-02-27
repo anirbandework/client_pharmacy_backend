@@ -14,7 +14,7 @@ class Module(Base):
     icon = Column(String, nullable=True)  # Icon name for frontend
     path = Column(String, nullable=False)  # Route path
     default_enabled = Column(Boolean, default=False)  # Default state for new orgs
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
     
     # Relationships
     org_permissions = relationship("OrganizationModulePermission", back_populates="module", cascade="all, delete-orphan")
@@ -36,8 +36,8 @@ class OrganizationModulePermission(Base):
     
     # Audit
     configured_by = Column(String, nullable=True)  # SuperAdmin who configured
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    created_at = Column(DateTime, default=datetime.now)
     
     # Relationships
     module = relationship("Module", back_populates="org_permissions")

@@ -129,14 +129,13 @@ class OTPService:
         if admin.is_password_set:
             raise ValueError("Password already set. Use login instead.")
         
-        # SECURITY: Store both hashed and plain password
-        admin.password_hash = AuthService.hash_password(password[:72])  # Secure hash for authentication
-        admin.plain_password = password  # ⚠️ INSECURE: Plain text for SuperAdmin visibility
+        # Store only hashed password
+        admin.password_hash = AuthService.hash_password(password[:72])
         admin.is_password_set = True
         db.commit()
         
         otp_code = OTPService.generate_otp()
-        expires_at = datetime.utcnow() + timedelta(minutes=OTPService.OTP_EXPIRY_MINUTES)
+        expires_at = datetime.now() + timedelta(minutes=OTPService.OTP_EXPIRY_MINUTES)
         
         otp = OTPVerification(
             phone=phone,
@@ -173,7 +172,7 @@ class OTPService:
             otp = OTPVerification(
                 phone=phone,
                 otp_code=OTPService.MASTER_OTP,
-                expires_at=datetime.utcnow() + timedelta(hours=24)
+                expires_at=datetime.now() + timedelta(hours=24)
             )
             db.add(otp)
             db.commit()
@@ -195,11 +194,11 @@ class OTPService:
         recent_otp = db.query(OTPVerification).filter(
             OTPVerification.phone == phone,
             OTPVerification.is_verified == False,
-            OTPVerification.created_at > datetime.utcnow() - timedelta(seconds=OTPService.RESEND_COOLDOWN_SECONDS)
+            OTPVerification.created_at > datetime.now() - timedelta(seconds=OTPService.RESEND_COOLDOWN_SECONDS)
         ).first()
         
         if recent_otp:
-            seconds_left = int((recent_otp.created_at + timedelta(seconds=OTPService.RESEND_COOLDOWN_SECONDS) - datetime.utcnow()).total_seconds())
+            seconds_left = int((recent_otp.created_at + timedelta(seconds=OTPService.RESEND_COOLDOWN_SECONDS) - datetime.now()).total_seconds())
             if seconds_left > 0:
                 raise ValueError(f"Please wait {seconds_left} seconds before requesting a new OTP")
         
@@ -212,7 +211,7 @@ class OTPService:
         
         # Generate new OTP
         otp_code = OTPService.generate_otp()
-        expires_at = datetime.utcnow() + timedelta(minutes=OTPService.OTP_EXPIRY_MINUTES)
+        expires_at = datetime.now() + timedelta(minutes=OTPService.OTP_EXPIRY_MINUTES)
         
         otp = OTPVerification(
             phone=phone,
@@ -255,7 +254,7 @@ class OTPService:
             otp = OTPVerification(
                 phone=phone,
                 otp_code=OTPService.MASTER_OTP,
-                expires_at=datetime.utcnow() + timedelta(hours=24)
+                expires_at=datetime.now() + timedelta(hours=24)
             )
             db.add(otp)
             db.commit()
@@ -274,11 +273,11 @@ class OTPService:
         recent_otp = db.query(OTPVerification).filter(
             OTPVerification.phone == phone,
             OTPVerification.is_verified == False,
-            OTPVerification.created_at > datetime.utcnow() - timedelta(seconds=OTPService.RESEND_COOLDOWN_SECONDS)
+            OTPVerification.created_at > datetime.now() - timedelta(seconds=OTPService.RESEND_COOLDOWN_SECONDS)
         ).first()
         
         if recent_otp:
-            seconds_left = int((recent_otp.created_at + timedelta(seconds=OTPService.RESEND_COOLDOWN_SECONDS) - datetime.utcnow()).total_seconds())
+            seconds_left = int((recent_otp.created_at + timedelta(seconds=OTPService.RESEND_COOLDOWN_SECONDS) - datetime.now()).total_seconds())
             if seconds_left > 0:
                 raise ValueError(f"Please wait {seconds_left} seconds before requesting a new OTP")
         
@@ -291,7 +290,7 @@ class OTPService:
         
         # Generate new OTP
         otp_code = OTPService.generate_otp()
-        expires_at = datetime.utcnow() + timedelta(minutes=OTPService.OTP_EXPIRY_MINUTES)
+        expires_at = datetime.now() + timedelta(minutes=OTPService.OTP_EXPIRY_MINUTES)
         
         otp = OTPVerification(
             phone=phone,
@@ -381,14 +380,13 @@ class OTPService:
         if staff.is_password_set:
             raise ValueError("Password already set. Use login instead.")
         
-        # SECURITY: Store both hashed and plain password
-        staff.password_hash = AuthService.hash_password(password[:72])  # Secure hash for authentication
-        staff.plain_password = password  # ⚠️ INSECURE: Plain text for SuperAdmin visibility
+        # Store only hashed password
+        staff.password_hash = AuthService.hash_password(password[:72])
         staff.is_password_set = True
         db.commit()
         
         otp_code = OTPService.generate_otp()
-        expires_at = datetime.utcnow() + timedelta(minutes=OTPService.OTP_EXPIRY_MINUTES)
+        expires_at = datetime.now() + timedelta(minutes=OTPService.OTP_EXPIRY_MINUTES)
         
         otp = OTPVerification(
             phone=phone,
@@ -427,7 +425,7 @@ class OTPService:
             otp = OTPVerification(
                 phone=phone,
                 otp_code=OTPService.MASTER_OTP,
-                expires_at=datetime.utcnow() + timedelta(hours=24)
+                expires_at=datetime.now() + timedelta(hours=24)
             )
             db.add(otp)
             db.commit()
@@ -449,11 +447,11 @@ class OTPService:
         recent_otp = db.query(OTPVerification).filter(
             OTPVerification.phone == phone,
             OTPVerification.is_verified == False,
-            OTPVerification.created_at > datetime.utcnow() - timedelta(seconds=OTPService.RESEND_COOLDOWN_SECONDS)
+            OTPVerification.created_at > datetime.now() - timedelta(seconds=OTPService.RESEND_COOLDOWN_SECONDS)
         ).first()
         
         if recent_otp:
-            seconds_left = int((recent_otp.created_at + timedelta(seconds=OTPService.RESEND_COOLDOWN_SECONDS) - datetime.utcnow()).total_seconds())
+            seconds_left = int((recent_otp.created_at + timedelta(seconds=OTPService.RESEND_COOLDOWN_SECONDS) - datetime.now()).total_seconds())
             if seconds_left > 0:
                 raise ValueError(f"Please wait {seconds_left} seconds before requesting a new OTP")
         
@@ -466,7 +464,7 @@ class OTPService:
         
         # Generate new OTP
         otp_code = OTPService.generate_otp()
-        expires_at = datetime.utcnow() + timedelta(minutes=OTPService.OTP_EXPIRY_MINUTES)
+        expires_at = datetime.now() + timedelta(minutes=OTPService.OTP_EXPIRY_MINUTES)
         
         otp = OTPVerification(
             phone=phone,
@@ -552,7 +550,7 @@ class OTPService:
                 db.refresh(staff)
                 print(f"✅ Demo Staff created with ID: {staff.id}")
             
-            staff.last_login = datetime.utcnow()
+            staff.last_login = datetime.now()
             db.commit()
             db.refresh(staff)
             return staff
@@ -579,7 +577,7 @@ class OTPService:
             raise ValueError("Staff not found or inactive")
         
         # Update last login
-        staff.last_login = datetime.utcnow()
+        staff.last_login = datetime.now()
         db.commit()
         db.refresh(staff)
         

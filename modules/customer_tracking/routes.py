@@ -308,10 +308,10 @@ def mark_reminder_sent(
     from datetime import datetime
     if method == "whatsapp":
         reminder.whatsapp_sent = True
-        reminder.whatsapp_sent_date = datetime.utcnow()
+        reminder.whatsapp_sent_date = datetime.now()
     elif method == "call":
         reminder.call_reminder_sent = True
-        reminder.call_reminder_date = datetime.utcnow()
+        reminder.call_reminder_date = datetime.now()
     
     db.commit()
     return {"message": f"Reminder marked as sent via {method}"}

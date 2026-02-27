@@ -38,7 +38,7 @@ class InvoiceStockSyncService:
             if existing_item:
                 # Update quantity
                 existing_item.quantity_software += int(invoice_item.quantity)
-                existing_item.updated_at = datetime.utcnow()
+                existing_item.updated_at = datetime.now()
                 updated_items.append(existing_item.id)
                 logger.info(f"Updated stock item {existing_item.id}: +{invoice_item.quantity}")
             else:

@@ -57,7 +57,7 @@ class SalaryService:
             raise ValueError("Salary already paid")
         
         record.payment_status = models.PaymentStatus.PAID.value
-        record.payment_date = datetime.utcnow()
+        record.payment_date = datetime.now().date()
         record.paid_by_admin = payment_data.paid_by_admin
         if payment_data.notes:
             record.notes = payment_data.notes
@@ -295,7 +295,7 @@ class PaymentInfoService:
         for field, value in payment_data.model_dump(exclude_unset=True).items():
             setattr(payment_info, field, value)
         
-        payment_info.updated_at = datetime.utcnow()
+        payment_info.updated_at = datetime.now()
         db.commit()
         db.refresh(payment_info)
         
@@ -328,8 +328,8 @@ class PaymentInfoService:
             payment_info = models.StaffPaymentInfo(staff_id=staff_id, shop_id=shop_id)
             db.add(payment_info)
         
-        payment_info.qr_code_path = file_path
-        payment_info.updated_at = datetime.utcnow()
+        payment_info.qr_code_path = f"/{file_path}"
+        payment_info.updated_at = datetime.now()
         db.commit()
         
-        return file_path
+        return f"/{file_path}"

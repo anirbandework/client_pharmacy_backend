@@ -114,7 +114,7 @@ class CustomerTrackingService:
         for i, contact in enumerate(contacts):
             staff_id = staff_ids[i % len(staff_ids)]
             contact.assigned_staff_id = staff_id
-            contact.assigned_date = datetime.utcnow()
+            contact.assigned_date = datetime.now()
         
         db.commit()
     
@@ -140,9 +140,9 @@ class CustomerTrackingService:
         contact = db.query(ContactRecord).filter(ContactRecord.id == contact_id).first()
         if contact:
             contact.contact_attempts += 1
-            contact.last_contact_date = datetime.utcnow()
+            contact.last_contact_date = datetime.now()
             if not contact.first_contact_date:
-                contact.first_contact_date = datetime.utcnow()
+                contact.first_contact_date = datetime.now()
             if contact.contact_status == "pending":
                 contact.contact_status = "contacted"
         
@@ -166,7 +166,7 @@ class CustomerTrackingService:
         
         if contact and contact.contact_status != "converted":
             contact.contact_status = "converted"
-            contact.converted_date = datetime.utcnow()
+            contact.converted_date = datetime.now()
             contact.conversion_value = conversion_value
             db.commit()
     
@@ -240,7 +240,7 @@ class CustomerTrackingService:
         if customer:
             customer.total_visits += 1
             customer.total_purchases += purchase_data['total_amount']
-            customer.last_visit_date = datetime.utcnow()
+            customer.last_visit_date = datetime.now()
         
         # Create refill reminder if duration provided
         if purchase_data.get('duration_days'):

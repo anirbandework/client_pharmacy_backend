@@ -19,7 +19,7 @@ class ContactRecord(Base):
     
     # File upload tracking
     source_file = Column(String, nullable=True)
-    upload_date = Column(DateTime, default=datetime.utcnow)
+    upload_date = Column(DateTime, default=datetime.now)
     uploaded_by_staff_id = Column(Integer, ForeignKey("staff.id"), nullable=True)
     
     # Staff assignment
@@ -39,7 +39,7 @@ class ContactRecord(Base):
     converted_date = Column(DateTime, nullable=True)
     conversion_value = Column(Float, nullable=True)
     
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
     
     interactions = relationship("ContactInteraction", back_populates="contact", cascade="all, delete-orphan")
     reminders = relationship("ContactReminder", back_populates="contact", cascade="all, delete-orphan")
@@ -52,7 +52,7 @@ class ContactInteraction(Base):
     contact_id = Column(Integer, ForeignKey("contact_records.id", ondelete="CASCADE"), nullable=False)
     staff_id = Column(Integer, ForeignKey("staff.id"), nullable=False)
     
-    interaction_date = Column(DateTime, default=datetime.utcnow, index=True)
+    interaction_date = Column(DateTime, default=datetime.now, index=True)
     interaction_type = Column(String, nullable=False)  # call, whatsapp, visit
     
     notes = Column(Text, nullable=True)
@@ -62,7 +62,7 @@ class ContactInteraction(Base):
     call_duration = Column(Integer, nullable=True)
     call_successful = Column(Boolean, default=False)
     
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
     
     contact = relationship("ContactRecord", back_populates="interactions")
 
@@ -81,7 +81,7 @@ class ContactReminder(Base):
     completed = Column(Boolean, default=False)
     completed_date = Column(DateTime, nullable=True)
     
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
     
     contact = relationship("ContactRecord", back_populates="reminders")
 
@@ -111,7 +111,7 @@ class Customer(Base):
     primary_doctor = Column(String, nullable=True)
     
     # Tracking
-    first_visit_date = Column(DateTime, default=datetime.utcnow)
+    first_visit_date = Column(DateTime, default=datetime.now)
     last_visit_date = Column(DateTime, nullable=True)
     total_visits = Column(Integer, default=0)
     total_purchases = Column(Float, default=0.0)
@@ -121,7 +121,7 @@ class Customer(Base):
     generic_education_given = Column(Boolean, default=False)
     
     special_notes = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
     
     purchases = relationship("CustomerPurchase", back_populates="customer", cascade="all, delete-orphan")
     refill_reminders = relationship("RefillReminder", back_populates="customer", cascade="all, delete-orphan")
@@ -134,7 +134,7 @@ class CustomerPurchase(Base):
     customer_id = Column(Integer, ForeignKey("customers.id", ondelete="CASCADE"), nullable=False)
     bill_id = Column(Integer, ForeignKey("bills.id"), nullable=True)
     
-    purchase_date = Column(DateTime, default=datetime.utcnow, index=True)
+    purchase_date = Column(DateTime, default=datetime.now, index=True)
     
     medicine_name = Column(String, nullable=False)
     generic_name = Column(String, nullable=True)
@@ -147,7 +147,7 @@ class CustomerPurchase(Base):
     duration_days = Column(Integer, nullable=True)
     refill_reminder_date = Column(Date, nullable=True, index=True)
     
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
     
     customer = relationship("Customer", back_populates="purchases")
 
@@ -173,6 +173,6 @@ class RefillReminder(Base):
     customer_purchased = Column(Boolean, default=False)
     response_date = Column(DateTime, nullable=True)
     
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
     
     customer = relationship("Customer", back_populates="refill_reminders")

@@ -265,8 +265,8 @@ def update_invoice(
     invoice.custom_fields = invoice_data.custom_fields or {}
     invoice.is_verified = True
     invoice.verified_by = staff.id
-    invoice.verified_at = datetime.utcnow()
-    invoice.updated_at = datetime.utcnow()
+    invoice.verified_at = datetime.now()
+    invoice.updated_at = datetime.now()
     
     # Delete existing items
     db.query(models.PurchaseInvoiceItem).filter(
@@ -417,7 +417,7 @@ def delete_invoice(
                         db.delete(stock_item)
                         logger.info(f"Deleted stock item {stock_item.id} (quantity became {stock_item.quantity_software})")
                     else:
-                        stock_item.updated_at = datetime.utcnow()
+                        stock_item.updated_at = datetime.now()
                         logger.info(f"Reversed stock for {stock_item.product_name}: -{invoice_item.quantity}")
             
             db.flush()

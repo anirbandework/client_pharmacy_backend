@@ -33,7 +33,7 @@ class Notification(Base):
     target_type = Column(SQLEnum(NotificationTargetType), nullable=False)
     
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    created_at = Column(DateTime, default=datetime.now, index=True)
     expires_at = Column(DateTime, nullable=True)  # Optional expiry
     
     # Relationships
@@ -73,7 +73,7 @@ class NotificationRead(Base):
     staff_id = Column(Integer, ForeignKey("staff.id"), nullable=False, index=True)
     staff_name = Column(String, nullable=False)  # Audit trail
     shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False, index=True)  # Shop-level filtering
-    read_at = Column(DateTime, default=datetime.utcnow)
+    read_at = Column(DateTime, default=datetime.now)
     
     notification = relationship("Notification", back_populates="reads")
     staff = relationship("Staff")

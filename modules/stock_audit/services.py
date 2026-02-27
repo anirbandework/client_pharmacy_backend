@@ -34,7 +34,7 @@ class StockCalculationService:
             calculated_stock = StockCalculationService.calculate_software_stock(db, item.id)
             if item.quantity_software != calculated_stock:
                 item.quantity_software = calculated_stock
-                item.updated_at = datetime.utcnow()
+                item.updated_at = datetime.now()
                 updated_count += 1
         
         db.commit()
@@ -66,7 +66,7 @@ class StockCalculationService:
             ).first()
             if stock_item:
                 stock_item.quantity_software += item_data['quantity']
-                stock_item.updated_at = datetime.utcnow()
+                stock_item.updated_at = datetime.now()
         
         db.commit()
         return purchase
@@ -99,7 +99,7 @@ class StockCalculationService:
             db.add(sale_item)
             
             stock_item.quantity_software -= item_data['quantity']
-            stock_item.updated_at = datetime.utcnow()
+            stock_item.updated_at = datetime.now()
         
         db.commit()
         return sale
@@ -110,7 +110,7 @@ class StockAuditService:
     def get_random_section_for_audit(db: Session, shop_id: int, exclude_recent_days: int = 7) -> Optional[Dict[str, Any]]:
         """Get a random section that hasn't been audited recently"""
         
-        cutoff_date = datetime.utcnow() - timedelta(days=exclude_recent_days)
+        cutoff_date = datetime.now() - timedelta(days=exclude_recent_days)
         
         sections_query = db.query(StockSection).join(StockItem).filter(
             StockSection.shop_id == shop_id,
@@ -184,7 +184,7 @@ class StockAuditService:
         db.add(audit_record)
         
         stock_item.quantity_physical = physical_quantity
-        stock_item.last_audit_date = datetime.utcnow()
+        stock_item.last_audit_date = datetime.now()
         stock_item.last_audit_by_staff_id = staff_id
         stock_item.last_audit_by_staff_name = staff_name
         stock_item.audit_discrepancy = discrepancy
@@ -232,7 +232,7 @@ class StockAuditService:
             raise ValueError("Audit session not found")
         
         session.status = "completed"
-        session.completed_at = datetime.utcnow()
+        session.completed_at = datetime.now()
         if notes:
             session.session_notes = notes
         

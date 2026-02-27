@@ -15,7 +15,7 @@ class ShopWiFi(Base):
     shop_longitude = Column(String(20), nullable=True)
     geofence_radius_meters = Column(Integer, default=100)  # Default 100m radius
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
     
     shop = relationship("Shop")
     attendance_records = relationship("AttendanceRecord", back_populates="shop_wifi")
@@ -30,7 +30,7 @@ class StaffDevice(Base):
     mac_address = Column(String(17), unique=True, index=True, nullable=False)  # Format: AA:BB:CC:DD:EE:FF
     device_name = Column(String(100), nullable=True)  # e.g., "iPhone 12", "Samsung Galaxy"
     is_active = Column(Boolean, default=True)
-    registered_at = Column(DateTime, default=datetime.utcnow)
+    registered_at = Column(DateTime, default=datetime.now)
     last_seen = Column(DateTime, nullable=True)
     
     staff = relationship("Staff", back_populates="devices")
@@ -67,8 +67,8 @@ class AttendanceRecord(Base):
     # Notes
     notes = Column(String(500), nullable=True)
     
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     
     staff = relationship("Staff", back_populates="attendance_records")
     shop = relationship("Shop")
@@ -104,8 +104,8 @@ class AttendanceSettings(Base):
     saturday = Column(Boolean, default=True)
     sunday = Column(Boolean, default=False)
     
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     
     shop = relationship("Shop")
 
@@ -128,6 +128,6 @@ class LeaveRequest(Base):
     approved_at = Column(DateTime, nullable=True)
     rejection_reason = Column(String(500), nullable=True)
     
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
     
     staff = relationship("Staff", back_populates="leave_requests")

@@ -56,7 +56,9 @@ def get_salary_records(
     if user_type != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
     
-    query = db.query(models.SalaryRecord).filter(models.SalaryRecord.shop_id == shop_id)
+    query = db.query(models.SalaryRecord, Staff.name).join(
+        Staff, models.SalaryRecord.staff_id == Staff.id
+    ).filter(models.SalaryRecord.shop_id == shop_id)
     
     if staff_id:
         query = query.filter(models.SalaryRecord.staff_id == staff_id)
@@ -67,7 +69,26 @@ def get_salary_records(
     if status:
         query = query.filter(models.SalaryRecord.payment_status == status.value)
     
-    return query.order_by(models.SalaryRecord.due_date.desc()).all()
+    results = query.order_by(models.SalaryRecord.due_date.desc()).all()
+    
+    return [
+        schemas.SalaryRecord(
+            id=record.id,
+            staff_id=record.staff_id,
+            staff_name=staff_name,
+            month=record.month,
+            year=record.year,
+            salary_amount=record.salary_amount,
+            payment_status=record.payment_status,
+            payment_date=record.payment_date,
+            paid_by_admin=record.paid_by_admin,
+            due_date=record.due_date,
+            notes=record.notes,
+            created_at=record.created_at,
+            updated_at=record.updated_at
+        )
+        for record, staff_name in results
+    ]
 
 @router.put("/records/{record_id}/pay", response_model=schemas.SalaryRecord)
 def pay_salary(
@@ -268,12 +289,11 @@ def generate_monthly_salary_records(
             skipped_count += 1
             continue
         
-        # Create salary record with due date based on joining date + eligibility days
-        if staff.joining_date:
-            due_date = staff.joining_date + timedelta(days=staff.salary_eligibility_days)
+        # Due date is 5th of next month (e.g., Jan salary due on Feb 5)
+        if month == 12:
+            due_date = date(year + 1, 1, 5)
         else:
-            # Fallback to end of month if no joining date
-            due_date = date(year, month, last_day)
+            due_date = date(year, month + 1, 5)
         
         salary_record = models.SalaryRecord(
             staff_id=staff.id,

@@ -19,12 +19,12 @@ class SalaryRecord(Base):
     year = Column(Integer, nullable=False)
     salary_amount = Column(Float, nullable=False)
     payment_status = Column(String(20), default=PaymentStatus.PENDING.value)
-    payment_date = Column(DateTime, nullable=True)
+    payment_date = Column(Date, nullable=True)
     paid_by_admin = Column(String(100), nullable=True)
     due_date = Column(Date, nullable=False)
     notes = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     
     # Relationships
     staff = relationship("Staff", back_populates="salary_records")
@@ -41,8 +41,8 @@ class StaffPaymentInfo(Base):
     ifsc_code = Column(String(20), nullable=True)
     account_holder_name = Column(String(100), nullable=True)
     preferred_payment_method = Column(String(20), default="upi")  # upi, bank
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     
     # Relationships
     staff = relationship("Staff", back_populates="payment_info")
@@ -57,7 +57,7 @@ class SalaryAlert(Base):
     alert_type = Column(String(20), nullable=False)  # upcoming, overdue
     alert_date = Column(Date, nullable=False)
     is_dismissed = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
     
     # Relationships
     staff = relationship("Staff")

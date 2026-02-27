@@ -140,7 +140,7 @@ def delete_bill(
             stock_item.quantity_software += item.quantity
             if stock_item.quantity_physical is not None:
                 stock_item.audit_discrepancy = stock_item.quantity_software - stock_item.quantity_physical
-            stock_item.updated_at = datetime.utcnow()
+            stock_item.updated_at = datetime.now()
     
     db.delete(bill)
     db.commit()
@@ -201,7 +201,7 @@ def get_daily_sales(
 ):
     """Get daily sales for last N days"""
     staff, shop_id = current_user
-    cutoff_date = datetime.utcnow() - timedelta(days=days)
+    cutoff_date = datetime.now() - timedelta(days=days)
     
     from sqlalchemy import func
     results = db.query(

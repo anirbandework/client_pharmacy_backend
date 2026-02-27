@@ -22,8 +22,8 @@ class NotificationService:
         # Validate targets based on admin's organization
         if notification_data.target_type == NotificationTargetType.SHOP:
             # Validate shop access
-            org_shop_ids = db.query(Shop.id).join(Admin).filter(
-                Admin.organization_id == admin.organization_id
+            org_shop_ids = db.query(Shop.id).filter(
+                Shop.organization_id == admin.organization_id
             ).all()
             org_shop_ids = [sid[0] for sid in org_shop_ids]
             
@@ -33,8 +33,8 @@ class NotificationService:
         
         elif notification_data.target_type == NotificationTargetType.STAFF:
             # Validate staff access
-            org_staff_ids = db.query(Staff.id).join(Shop).join(Admin).filter(
-                Admin.organization_id == admin.organization_id
+            org_staff_ids = db.query(Staff.id).join(Shop).filter(
+                Shop.organization_id == admin.organization_id
             ).all()
             org_staff_ids = [sid[0] for sid in org_staff_ids]
             
@@ -113,7 +113,7 @@ class NotificationService:
         query = query.filter(
             or_(
                 Notification.expires_at.is_(None),
-                Notification.expires_at > datetime.utcnow()
+                Notification.expires_at > datetime.now()
             )
         )
         
