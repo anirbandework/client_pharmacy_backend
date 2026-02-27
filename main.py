@@ -1,7 +1,8 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
 from dotenv import load_dotenv
 import os
 from datetime import datetime
@@ -22,6 +23,8 @@ from modules.feedback.routes import router as feedback_router
 from modules.billing.routes import router as billing_router
 from modules.billing.daily_records_routes import router as billing_daily_records_router
 from modules.billing.analytics_routes import router as billing_analytics_router
+from modules.billing.shop_config_routes import router as shop_config_router
+from modules.billing.admin_config_routes import router as admin_config_router
 from modules.auth.middleware import ShopContextMiddleware
 from modules.auth.attendance.wifi_middleware import WiFiEnforcementMiddleware
 from modules.auth.attendance.scheduler import start_scheduler, shutdown_scheduler
@@ -87,6 +90,36 @@ app = FastAPI(
     default_response_class=CustomJSONResponse
 )
 
+# Custom validation error handler
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Convert Pydantic validation errors to user-friendly messages"""
+    errors = exc.errors()
+    
+    # Extract the first error for simplicity
+    if errors:
+        error = errors[0]
+        field = error.get('loc', [])[-1] if error.get('loc') else 'field'
+        msg = error.get('msg', 'Validation error')
+        
+        # Clean up the error message
+        if 'Value error,' in msg:
+            msg = msg.replace('Value error, ', '')
+        
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content={
+                "error": msg,
+                "field": field,
+                "message": msg  # For backward compatibility
+            }
+        )
+    
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={"error": "Validation error", "message": "Invalid input data"}
+    )
+
 # CORS Configuration
 allowed_origins = [
     "http://localhost:5173",  # Local Vite dev
@@ -128,6 +161,8 @@ app.include_router(stock_router, prefix="/api/stock-audit", tags=["Stock Audit"]
 app.include_router(billing_router, prefix="/api/billing", tags=["Billing System"])
 app.include_router(billing_daily_records_router, prefix="/api/billing", tags=["Daily Records"])
 app.include_router(billing_analytics_router, prefix="/api/billing", tags=["Analytics"])
+app.include_router(shop_config_router, prefix="/api/billing", tags=["Shop Config"])
+app.include_router(admin_config_router, prefix="/api/billing", tags=["Admin Config"])
 app.include_router(profit_router, prefix="/api/profit", tags=["Profit Analysis"])
 
 # Start attendance scheduler for stale session detection

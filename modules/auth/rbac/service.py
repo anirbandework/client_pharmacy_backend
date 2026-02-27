@@ -22,7 +22,7 @@ class RBACService:
         # Admin-only modules (default: admin=True, staff=False)
         admin_modules = [
             {"module_key": "admin_panel", "module_name": "Admin Dashboard", "icon": "Settings", "path": "/admin", "description": "Admin management", "default_admin": True, "default_staff": False},
-            {"module_key": "attendance_admin", "module_name": "Attendance Management", "icon": "Clock", "path": "/attendance", "description": "Manage staff attendance", "default_admin": True, "default_staff": False},
+            {"module_key": "attendance_admin", "module_name": "Attendance Handling", "icon": "Clock", "path": "/attendance", "description": "Manage staff attendance", "default_admin": True, "default_staff": False},
             {"module_key": "notifications_admin", "module_name": "Send Notifications", "icon": "Bell", "path": "/notifications", "description": "Send notifications", "default_admin": True, "default_staff": False},
             {"module_key": "salary_management", "module_name": "Payroll Management", "icon": "Wallet", "path": "/salary-management", "description": "Manage staff salaries", "default_admin": True, "default_staff": False},
         ]

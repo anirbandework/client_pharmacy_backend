@@ -10,52 +10,62 @@ from modules.auth.models import Staff, Admin, SuperAdmin, Shop
 
 router = APIRouter()
 
-# STAFF FEEDBACK
-@router.post("/staff/feedback", response_model=schemas.FeedbackResponse)
-def submit_staff_feedback(
+# USER FEEDBACK (STAFF & ADMIN)
+@router.post("/user/feedback", response_model=schemas.FeedbackResponse)
+def submit_user_feedback(
     feedback: schemas.FeedbackCreate,
     db: Session = Depends(get_db),
     user_dict: dict = Depends(get_user_dict)
 ):
-    """Staff submits feedback"""
-    if user_dict["token_data"].user_type != "staff":
-        raise HTTPException(status_code=403, detail="Staff access required")
+    """Staff or Admin submits feedback"""
+    user_type = user_dict["token_data"].user_type
     
-    staff = user_dict["user"]
-    shop = staff.shop
-    
-    
-    # Get admin info using organization_id
-    admin = db.query(Admin).filter(Admin.organization_id == shop.organization_id).first()
-    
-    db_feedback = models.Feedback(
-        user_type="staff",
-        user_id=staff.id,
-        user_name=staff.name,
-        user_phone=staff.phone,
-        user_email=staff.email,
-        shop_id=shop.id,
-        shop_name=shop.shop_name,
-        shop_location=shop.address,
-        organization_id=admin.organization_id if admin else None,
-        admin_name=admin.full_name if admin else None,
-        admin_phone=admin.phone if admin else None,
-        **feedback.model_dump()
-    )
+    if user_type == "staff":
+        staff = user_dict["user"]
+        shop = staff.shop
+        admin = db.query(Admin).filter(Admin.organization_id == shop.organization_id).first()
+        
+        db_feedback = models.Feedback(
+            user_type="staff",
+            user_id=staff.id,
+            user_name=staff.name,
+            user_phone=staff.phone,
+            user_email=staff.email,
+            shop_id=shop.id,
+            shop_name=shop.shop_name,
+            shop_location=shop.address,
+            organization_id=admin.organization_id if admin else None,
+            admin_name=admin.full_name if admin else None,
+            admin_phone=admin.phone if admin else None,
+            **feedback.model_dump()
+        )
+    elif user_type == "admin":
+        admin = user_dict["user"]
+        db_feedback = models.Feedback(
+            user_type="admin",
+            user_id=admin.id,
+            user_name=admin.full_name,
+            user_phone=admin.phone,
+            user_email=admin.email,
+            organization_id=admin.organization_id,
+            **feedback.model_dump()
+        )
+    else:
+        raise HTTPException(status_code=403, detail="Staff or Admin access required")
     
     db.add(db_feedback)
     db.commit()
     db.refresh(db_feedback)
     return db_feedback
 
-# ADMIN FEEDBACK
+# ADMIN FEEDBACK (DEPRECATED - use /user/feedback)
 @router.post("/admin/feedback", response_model=schemas.FeedbackResponse)
 def submit_admin_feedback(
     feedback: schemas.FeedbackCreate,
     admin: Admin = Depends(get_current_admin),
     db: Session = Depends(get_db)
 ):
-    """Admin submits feedback"""
+    """Admin submits feedback (deprecated, use /user/feedback)"""
     db_feedback = models.Feedback(
         user_type="admin",
         user_id=admin.id,

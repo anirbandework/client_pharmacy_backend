@@ -98,13 +98,39 @@ def get_wifi_status(
     """
     Check current WiFi connection status and attendance record.
     Returns whether staff is checked in and can access modules.
+    Admin can check status for any shop they manage.
     """
     
     user, shop_id, user_type = current_user
     
-    # Only staff can check their own status
-    if user_type != "staff":
-        raise HTTPException(status_code=403, detail="Only staff can check WiFi status")
+    # Admin checking shop status
+    if user_type == "admin":
+        # Return shop-level status for admin
+        today = date.today()
+        cutoff_time = datetime.utcnow() - timedelta(minutes=2)
+        
+        connected_count = db.query(models.AttendanceRecord).filter(
+            models.AttendanceRecord.shop_id == shop_id,
+            models.AttendanceRecord.date == today,
+            models.AttendanceRecord.check_in_time.isnot(None),
+            models.AttendanceRecord.check_out_time.is_(None),
+            models.AttendanceRecord.updated_at >= cutoff_time
+        ).count()
+        
+        settings = db.query(models.AttendanceSettings).filter(
+            models.AttendanceSettings.shop_id == shop_id
+        ).first()
+        
+        return {
+            "is_checked_in": True,  # Admin is always "checked in"
+            "can_access_modules": True,  # Admin can always access
+            "is_inside_geofence": True,
+            "allow_any_network": settings.allow_any_network if settings else False,
+            "connected_staff_count": connected_count,
+            "message": f"{connected_count} staff currently connected"
+        }
+    
+    # Staff checking their own status
     
     # Get today's attendance
     today = date.today()

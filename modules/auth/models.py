@@ -49,6 +49,9 @@ class Shop(Base):
     license_number = Column(String, nullable=True)
     gst_number = Column(String, nullable=True)
     
+    # Bill configuration (JSON)
+    bill_config = Column(Text, nullable=True)  # Stores JSON config for bill format
+    
     # Audit fields
     created_by_admin = Column(String, nullable=False)  # Admin name who created
     updated_by_admin = Column(String, nullable=True)   # Admin name who last updated

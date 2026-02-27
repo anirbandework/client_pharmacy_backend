@@ -201,6 +201,80 @@ def delete_admin(
             "staff_deleted": 0
         }
 
+@router.get("/super-admin/analytics")
+def get_analytics(
+    super_admin: models.SuperAdmin = Depends(get_current_super_admin),
+    db: Session = Depends(get_db)
+):
+    """Get analytics data for charts and graphs"""
+    from sqlalchemy import func
+    from datetime import datetime, timedelta
+    
+    organizations = db.query(models.Admin.organization_id).distinct().all()
+    org_ids = [org[0] for org in organizations]
+    
+    # Organization distribution
+    org_distribution = []
+    for org_id in org_ids:
+        org_admins = db.query(models.Admin).filter(models.Admin.organization_id == org_id).count()
+        org_shops = db.query(models.Shop).filter(models.Shop.organization_id == org_id).count()
+        shop_ids = db.query(models.Shop.id).filter(models.Shop.organization_id == org_id).all()
+        shop_ids = [sid[0] for sid in shop_ids]
+        org_staff = db.query(models.Staff).filter(models.Staff.shop_id.in_(shop_ids)).count() if shop_ids else 0
+        
+        org_distribution.append({
+            "organization_id": org_id,
+            "admins": org_admins,
+            "shops": org_shops,
+            "staff": org_staff
+        })
+    
+    # Staff per shop
+    shops = db.query(models.Shop).all()
+    staff_per_shop = []
+    for shop in shops:
+        staff_count = db.query(models.Staff).filter(models.Staff.shop_id == shop.id).count()
+        staff_per_shop.append({
+            "shop_name": shop.shop_name,
+            "shop_code": shop.shop_code,
+            "staff_count": staff_count
+        })
+    
+    # Active vs Inactive
+    active_admins = db.query(models.Admin).filter(models.Admin.is_active == True).count()
+    inactive_admins = db.query(models.Admin).filter(models.Admin.is_active == False).count()
+    active_shops = db.query(models.Shop).filter(models.Shop.is_active == True).count()
+    inactive_shops = db.query(models.Shop).filter(models.Shop.is_active == False).count()
+    active_staff = db.query(models.Staff).filter(models.Staff.is_active == True).count()
+    inactive_staff = db.query(models.Staff).filter(models.Staff.is_active == False).count()
+    
+    # Recent registrations (last 30 days)
+    thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+    recent_admins = db.query(models.Admin).filter(models.Admin.created_at >= thirty_days_ago).count()
+    recent_shops = db.query(models.Shop).filter(models.Shop.created_at >= thirty_days_ago).count()
+    recent_staff = db.query(models.Staff).filter(models.Staff.created_at >= thirty_days_ago).count()
+    
+    return {
+        "summary": {
+            "total_organizations": len(org_ids),
+            "total_admins": db.query(models.Admin).count(),
+            "total_shops": db.query(models.Shop).count(),
+            "total_staff": db.query(models.Staff).count()
+        },
+        "org_distribution": org_distribution,
+        "staff_per_shop": staff_per_shop[:10],  # Top 10 shops
+        "active_status": {
+            "admins": {"active": active_admins, "inactive": inactive_admins},
+            "shops": {"active": active_shops, "inactive": inactive_shops},
+            "staff": {"active": active_staff, "inactive": inactive_staff}
+        },
+        "recent_registrations": {
+            "admins": recent_admins,
+            "shops": recent_shops,
+            "staff": recent_staff
+        }
+    }
+
 @router.get("/super-admin/dashboard")
 def get_dashboard(
     super_admin: models.SuperAdmin = Depends(get_current_super_admin),
