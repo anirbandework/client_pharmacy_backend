@@ -39,6 +39,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         skip_paths = [
             "/", "/health", "/modules",
             "/api/attendance/wifi/status",
+            "/api/attendance/wifi/heartbeat",
             "/api/feedback/my-feedback/unread-count"
         ]
         if request.url.path in skip_paths or request.method == "OPTIONS":
