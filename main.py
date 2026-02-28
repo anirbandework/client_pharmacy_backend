@@ -13,6 +13,8 @@ load_dotenv()
 
 from modules.customer_tracking.routes import router as customer_router
 from modules.invoice_analyzer.routes import router as invoice_router
+from modules.invoice_analyzer.template_routes import router as invoice_template_router
+from modules.invoice_analyzer.admin_analytics_routes import router as invoice_admin_analytics_router
 from modules.stock_audit.routes import router as stock_router
 from modules.profit_analysis.routes import router as profit_router
 from modules.auth.routes import router as auth_router
@@ -125,7 +127,9 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 allowed_origins = [
     "http://localhost:5173",  # Local Vite dev
     "http://localhost:3000",  # Alternative local
-    "https://client-pharmacy-frontend.vercel.app",  # Production Vercel
+    "https://client-pharmacy-frontend.vercel.app",  # Old Vercel
+    "https://xyz.com",  # Production domain
+    "https://www.xyz.com",  # Production domain with www
 ]
 
 # Allow all Vercel preview deployments
@@ -157,6 +161,8 @@ app.include_router(attendance_router, prefix="/api/attendance", tags=["Attendanc
 app.include_router(notifications_router, prefix="/api/notifications", tags=["Notifications"])
 app.include_router(feedback_router, prefix="/api/feedback", tags=["Feedback System"])
 app.include_router(customer_router, prefix="/api/customer-tracking", tags=["Customer Tracking"])
+app.include_router(invoice_template_router, prefix="/api/purchase-invoices", tags=["Purchase Invoice Analyzer"])
+app.include_router(invoice_admin_analytics_router, prefix="/api/purchase-invoices", tags=["Purchase Invoice Analytics - Admin"])
 app.include_router(invoice_router, prefix="/api/purchase-invoices", tags=["Purchase Invoice Analyzer"])
 app.include_router(stock_router, prefix="/api/stock-audit", tags=["Stock Audit"])
 app.include_router(billing_router, prefix="/api/billing", tags=["Billing System"])

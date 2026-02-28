@@ -11,6 +11,7 @@ import shutil
 import logging
 from . import models, schemas
 from .ai_extractor import AIInvoiceExtractor
+from .excel_extractor import ExcelInvoiceExtractor
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ async def upload_invoice_pdf(
     db: Session = Depends(get_db),
     current_user: tuple = Depends(get_current_user)
 ):
-    """Upload and process purchase invoice PDF"""
+    """Upload and process purchase invoice PDF or Excel"""
     import logging
     logger = logging.getLogger(__name__)
     logger.info(f"📤 Upload request received - File: {file.filename}, Size: {file.size if hasattr(file, 'size') else 'unknown'}")
@@ -34,9 +35,12 @@ async def upload_invoice_pdf(
     staff, shop_id = current_user
     
     # Validate file type
-    if not file.filename.endswith('.pdf'):
+    is_pdf = file.filename.lower().endswith('.pdf')
+    is_excel = file.filename.lower().endswith(('.xlsx', '.xls'))
+    
+    if not (is_pdf or is_excel):
         logger.error(f"❌ Invalid file type: {file.filename}")
-        raise HTTPException(status_code=400, detail="Only PDF files are allowed")
+        raise HTTPException(status_code=400, detail="Only PDF or Excel files are allowed")
     
     # Save PDF file temporarily
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -52,16 +56,21 @@ async def upload_invoice_pdf(
         logger.error(f"❌ Failed to save file: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
     
-    # Extract text from PDF
+    # Extract data from file
     try:
-        logger.info(f"🔍 Starting PDF extraction...")
-        extractor = AIInvoiceExtractor()
-        parsed_data = extractor.extract_from_pdf(file_path)
-        logger.info(f"✅ PDF extraction completed - Found {len(parsed_data.get('items', []))} items")
+        if is_pdf:
+            logger.info(f"🔍 Starting PDF extraction...")
+            extractor = AIInvoiceExtractor()
+            parsed_data = extractor.extract_from_pdf(file_path)
+            logger.info(f"✅ PDF extraction completed - Found {len(parsed_data.get('items', []))} items")
+        else:  # Excel
+            logger.info(f"📊 Starting Excel extraction...")
+            parsed_data = ExcelInvoiceExtractor.extract_from_excel(file_path)
+            logger.info(f"✅ Excel extraction completed - Found {len(parsed_data.get('items', []))} items")
     except Exception as e:
-        logger.error(f"❌ PDF extraction failed: {str(e)}")
+        logger.error(f"❌ Extraction failed: {str(e)}")
         os.remove(file_path)
-        raise HTTPException(status_code=400, detail=f"Failed to parse PDF: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Failed to parse file: {str(e)}")
     
     # Check for duplicate invoice (by invoice number OR by supplier+date+amount)
     invoice_number = parsed_data.get("invoice_number", "UNKNOWN")
@@ -395,10 +404,14 @@ def delete_invoice(
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
     
-    # Reverse stock quantities if invoice was verified and synced
+    # Check if stock items are used in bills
+    stock_reversed = False
+    items_in_use = []
+    
     if invoice.is_verified:
         try:
             from modules.stock_audit.models import StockItem
+            from modules.billing.models import BillItem
             
             for invoice_item in invoice.items:
                 # Find corresponding stock item
@@ -409,33 +422,59 @@ def delete_invoice(
                 ).first()
                 
                 if stock_item:
-                    # Reverse the quantity
-                    stock_item.quantity_software -= int(invoice_item.quantity)
+                    # Check if stock item is used in any bills
+                    bill_item_count = db.query(BillItem).filter(
+                        BillItem.stock_item_id == stock_item.id
+                    ).count()
                     
-                    # If quantity becomes 0 or negative and item was only from this invoice, delete it
-                    if stock_item.quantity_software <= 0 and stock_item.source_invoice_id == invoice_id:
-                        db.delete(stock_item)
-                        logger.info(f"Deleted stock item {stock_item.id} (quantity became {stock_item.quantity_software})")
-                    else:
+                    if bill_item_count > 0:
+                        # Stock item is used in bills, only reverse quantity and nullify source
+                        stock_item.quantity_software -= int(invoice_item.quantity)
+                        stock_item.source_invoice_id = None  # Nullify reference
                         stock_item.updated_at = datetime.now()
-                        logger.info(f"Reversed stock for {stock_item.product_name}: -{invoice_item.quantity}")
+                        items_in_use.append(invoice_item.product_name)
+                        logger.info(f"Reversed stock for {stock_item.product_name}: -{invoice_item.quantity} (item in use, not deleted)")
+                    else:
+                        # Stock item not used in bills, safe to delete if quantity <= 0
+                        stock_item.quantity_software -= int(invoice_item.quantity)
+                        
+                        if stock_item.quantity_software <= 0 and stock_item.source_invoice_id == invoice_id:
+                            db.delete(stock_item)
+                            logger.info(f"Deleted stock item {stock_item.id} (quantity became {stock_item.quantity_software})")
+                        else:
+                            stock_item.source_invoice_id = None  # Nullify reference
+                            stock_item.updated_at = datetime.now()
+                            logger.info(f"Reversed stock for {stock_item.product_name}: -{invoice_item.quantity}")
             
             db.flush()
+            stock_reversed = True
         except Exception as e:
             logger.error(f"Failed to reverse stock quantities: {e}")
-            # Continue with invoice deletion even if stock reversal fails
+            db.rollback()
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot delete invoice: {str(e)}"
+            )
     
-    # Delete PDF file
-    if invoice.pdf_path and os.path.exists(invoice.pdf_path):
-        try:
-            os.remove(invoice.pdf_path)
-        except Exception as e:
-            pass  # Continue even if file deletion fails
+    # Store pdf_path before deleting invoice
+    pdf_path = invoice.pdf_path
     
+    # Delete invoice (cascade will delete items)
     db.delete(invoice)
     db.commit()
     
-    return {"message": "Invoice deleted successfully", "stock_reversed": invoice.is_verified}
+    # Delete PDF file after successful commit
+    if pdf_path and os.path.exists(pdf_path):
+        try:
+            os.remove(pdf_path)
+        except Exception as e:
+            logger.warning(f"Failed to delete PDF file: {e}")
+    
+    response = {"message": "Invoice deleted successfully", "stock_reversed": stock_reversed}
+    if items_in_use:
+        response["warning"] = f"{len(items_in_use)} items are used in bills and were not deleted from stock"
+    
+    return response
 
 @router.get("/stats/summary")
 def get_invoice_summary(

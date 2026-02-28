@@ -25,6 +25,7 @@ class RBACService:
             {"module_key": "attendance_admin", "module_name": "Attendance Handling", "icon": "Clock", "path": "/attendance", "description": "Manage staff attendance", "default_admin": True, "default_staff": False},
             {"module_key": "notifications_admin", "module_name": "Send Notifications", "icon": "Bell", "path": "/notifications", "description": "Send notifications", "default_admin": True, "default_staff": False},
             {"module_key": "salary_management", "module_name": "Payroll Management", "icon": "Wallet", "path": "/salary-management", "description": "Manage staff salaries", "default_admin": True, "default_staff": False},
+            {"module_key": "invoice_analytics", "module_name": "Invoice Analytics", "icon": "Brain", "path": "/invoice-analytics", "description": "AI-powered invoice insights", "default_admin": True, "default_staff": False},
         ]
         
         all_modules = staff_modules + admin_modules

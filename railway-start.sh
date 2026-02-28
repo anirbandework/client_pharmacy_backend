@@ -7,6 +7,11 @@ echo "📊 Environment Check:"
 echo "PORT: $PORT"
 echo "DATABASE_URL: ${DATABASE_URL:0:20}..."
 
+# Create uploads directory
+echo "📁 Creating uploads directory..."
+mkdir -p uploads/qr_codes
+mkdir -p uploads/invoices
+
 # Skip Alembic migrations - tables created by SQLAlchemy
 echo "⚠️  Skipping Alembic migrations (using SQLAlchemy create_all)"
 

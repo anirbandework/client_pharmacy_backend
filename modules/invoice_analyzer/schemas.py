@@ -12,7 +12,6 @@ class PurchaseInvoiceItemUpdate(BaseModel):
     package: Optional[str] = None
     expiry_date: Optional[date] = None
     mrp: Optional[str] = None
-    quantity: float
     free_quantity: float = 0.0
     unit_price: float
     discount_percent: float = 0.0
