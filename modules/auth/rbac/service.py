@@ -26,6 +26,8 @@ class RBACService:
             {"module_key": "notifications_admin", "module_name": "Send Notifications", "icon": "Bell", "path": "/notifications", "description": "Send notifications", "default_admin": True, "default_staff": False},
             {"module_key": "salary_management", "module_name": "Payroll Management", "icon": "Wallet", "path": "/salary-management", "description": "Manage staff salaries", "default_admin": True, "default_staff": False},
             {"module_key": "invoice_analytics", "module_name": "Invoice Analytics", "icon": "Brain", "path": "/invoice-analytics", "description": "AI-powered invoice insights", "default_admin": True, "default_staff": False},
+            {"module_key": "stock_analytics", "module_name": "Stock Analytics", "icon": "BarChart3", "path": "/stock-analytics", "description": "Stock audit analytics & insights", "default_admin": True, "default_staff": False},
+            {"module_key": "billing_analytics", "module_name": "Billing Analytics", "icon": "LineChart", "path": "/billing-analytics", "description": "Revenue & expense analytics with AI insights", "default_admin": True, "default_staff": False},
         ]
         
         all_modules = staff_modules + admin_modules
@@ -42,7 +44,13 @@ class RBACService:
                 module = models.Module(**module_data, default_enabled=False)
                 db.add(module)
         
-        db.commit()
+        try:
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            # If commit fails (e.g., duplicate key), just continue
+            pass
+        
         return db.query(models.Module).all()
     
     @staticmethod

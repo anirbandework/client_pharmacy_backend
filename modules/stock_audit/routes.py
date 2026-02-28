@@ -6,6 +6,8 @@ from datetime import datetime, date, timedelta
 from typing import Optional, List
 from . import schemas, models, services
 from .ai_service import StockAuditAIService
+from .admin_analytics import StockAuditAnalytics
+from .admin_ai_analytics import StockAuditAIAnalytics
 from .dependencies import get_current_user_with_geofence as get_current_user
 from modules.auth.dependencies import get_current_admin
 from openpyxl import Workbook
@@ -738,6 +740,39 @@ def get_stock_adjustments(
     return query.order_by(models.StockAdjustment.adjustment_date.desc()).offset(skip).limit(limit).all()
 
 # AI ANALYTICS
+
+@router.get("/admin/analytics/dashboard")
+def get_admin_dashboard_analytics(
+    shop_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    admin = Depends(get_current_admin)
+):
+    """Get comprehensive stock audit analytics for admin dashboard"""
+    try:
+        return StockAuditAnalytics.get_comprehensive_analytics(
+            db=db,
+            organization_id=admin.organization_id,
+            shop_id=shop_id
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/admin/analytics/ai-insights")
+def get_admin_ai_insights(
+    shop_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    admin = Depends(get_current_admin)
+):
+    """Get AI-generated insights for admin (organization-wide or specific shop)"""
+    try:
+        ai_service = StockAuditAIAnalytics()
+        return ai_service.generate_comprehensive_analysis(
+            db=db,
+            organization_id=admin.organization_id,
+            shop_id=shop_id
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/ai-analytics/comprehensive")
 def get_comprehensive_ai_analysis(

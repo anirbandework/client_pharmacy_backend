@@ -28,6 +28,7 @@ from modules.billing.daily_records_routes import router as billing_daily_records
 from modules.billing.analytics_routes import router as billing_analytics_router
 from modules.billing.shop_config_routes import router as shop_config_router
 from modules.billing.admin_config_routes import router as admin_config_router
+from modules.billing.admin_analytics_routes import router as billing_admin_analytics_router
 from modules.auth.middleware import ShopContextMiddleware
 from modules.auth.attendance.wifi_middleware import WiFiEnforcementMiddleware
 from modules.auth.attendance.scheduler import start_scheduler, shutdown_scheduler
@@ -170,6 +171,7 @@ app.include_router(billing_daily_records_router, prefix="/api/billing", tags=["D
 app.include_router(billing_analytics_router, prefix="/api/billing", tags=["Analytics"])
 app.include_router(shop_config_router, prefix="/api/billing", tags=["Shop Config"])
 app.include_router(admin_config_router, prefix="/api/billing", tags=["Admin Config"])
+app.include_router(billing_admin_analytics_router, prefix="/api/billing", tags=["Admin Analytics"])
 app.include_router(profit_router, prefix="/api/profit", tags=["Profit Analysis"])
 
 # Start attendance scheduler for stale session detection
