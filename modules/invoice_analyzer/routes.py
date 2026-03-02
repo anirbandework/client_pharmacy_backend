@@ -72,22 +72,48 @@ async def upload_invoice_pdf(
         os.remove(file_path)
         raise HTTPException(status_code=400, detail=f"Failed to parse file: {str(e)}")
     
-    # Check for duplicate invoice (by invoice number OR by supplier+date+amount)
+    # Check for duplicate invoice
     invoice_number = parsed_data.get("invoice_number", "UNKNOWN")
     supplier_name = parsed_data.get("supplier_name", "Unknown Supplier")
     net_amount = parsed_data.get("net_amount", 0.0)
+    invoice_date_str = parsed_data.get("invoice_date")
     
-    existing_invoice = db.query(models.PurchaseInvoice).filter(
+    # Parse invoice date for comparison
+    invoice_date = None
+    if invoice_date_str:
+        try:
+            invoice_date = datetime.strptime(invoice_date_str, "%d/%m/%Y").date()
+        except:
+            pass
+    
+    # Check 1: Exact invoice number match
+    existing_by_number = db.query(models.PurchaseInvoice).filter(
         models.PurchaseInvoice.shop_id == shop_id,
         models.PurchaseInvoice.invoice_number == invoice_number
     ).first()
     
-    if existing_invoice:
+    if existing_by_number:
         os.remove(file_path)
         raise HTTPException(
             status_code=409,
-            detail=f"Duplicate invoice detected! Invoice number '{invoice_number}' already exists."
+            detail=f"Duplicate invoice detected! Invoice number '{invoice_number}' already exists (Invoice ID: {existing_by_number.id})."
         )
+    
+    # Check 2: Similar invoice (same supplier + date + amount)
+    if invoice_date and supplier_name and net_amount > 0:
+        existing_similar = db.query(models.PurchaseInvoice).filter(
+            models.PurchaseInvoice.shop_id == shop_id,
+            models.PurchaseInvoice.supplier_name == supplier_name,
+            func.date(models.PurchaseInvoice.invoice_date) == invoice_date,
+            models.PurchaseInvoice.net_amount == net_amount
+        ).first()
+        
+        if existing_similar:
+            os.remove(file_path)
+            raise HTTPException(
+                status_code=409,
+                detail=f"Possible duplicate invoice detected! A similar invoice from '{supplier_name}' with same date ({invoice_date_str}) and amount (₹{net_amount:.2f}) already exists (Invoice: {existing_similar.invoice_number})."
+            )
     
     # Parse dates
     def parse_date(date_str):
@@ -146,21 +172,45 @@ async def upload_invoice_pdf(
             except:
                 pass
         
+        # Parse manufacturing date
+        manufacturing_date = None
+        if item_data.get("manufacturing_date"):
+            try:
+                mfg_str = item_data['manufacturing_date']
+                if isinstance(mfg_str, datetime):
+                    manufacturing_date = mfg_str.date()
+                elif '/' in mfg_str:
+                    parts = mfg_str.split('/')
+                    if len(parts) == 2:
+                        manufacturing_date = datetime.strptime(f"01/{mfg_str}", "%d/%m/%Y").date()
+                    elif len(parts) == 3:
+                        manufacturing_date = datetime.strptime(mfg_str, "%d/%m/%Y").date()
+            except:
+                pass
+        
         item = models.PurchaseInvoiceItem(
             invoice_id=invoice.id,
             shop_id=shop_id,
+            composition=item_data.get("composition"),
             manufacturer=item_data.get("manufacturer"),
             hsn_code=item_data.get("hsn_code"),
-            product_name=item_data.get("product_name", "Unknown Product"),
+            product_name=item_data.get("product_name") or "Unknown Product",
             batch_number=item_data.get("batch_number"),
             quantity=item_data.get("quantity", 1),
+            free_quantity=item_data.get("free_quantity", 0.0),
             package=item_data.get("package"),
+            unit=item_data.get("unit"),
+            manufacturing_date=manufacturing_date,
             expiry_date=expiry_date,
             mrp=item_data.get("mrp"),
-            free_quantity=item_data.get("free_quantity", 0.0),
             unit_price=item_data.get("unit_price", 0.0),
+            selling_price=item_data.get("selling_price", 0.0),
+            profit_margin=item_data.get("profit_margin", 0.0),
+            discount_on_purchase=item_data.get("discount_on_purchase", 0.0),
+            discount_on_sales=item_data.get("discount_on_sales", 0.0),
             discount_percent=item_data.get("discount_percent", 0.0),
             discount_amount=item_data.get("discount_amount", 0.0),
+            before_discount=item_data.get("before_discount", 0.0),
             taxable_amount=item_data.get("taxable_amount", 0.0),
             cgst_percent=item_data.get("cgst_percent", 0.0),
             cgst_amount=item_data.get("cgst_amount", 0.0),
@@ -288,21 +338,33 @@ def update_invoice(
         if item_data.expiry_date:
             expiry_date = parse_date(item_data.expiry_date)
         
+        manufacturing_date = None
+        if item_data.manufacturing_date:
+            manufacturing_date = parse_date(item_data.manufacturing_date)
+        
         item = models.PurchaseInvoiceItem(
             invoice_id=invoice.id,
             shop_id=shop_id,
+            composition=item_data.composition,
             manufacturer=item_data.manufacturer,
             hsn_code=item_data.hsn_code,
-            product_name=item_data.product_name,
+            product_name=item_data.product_name or "Unknown Product",
             batch_number=item_data.batch_number,
             quantity=item_data.quantity,
+            free_quantity=item_data.free_quantity,
             package=item_data.package,
+            unit=item_data.unit,
+            manufacturing_date=manufacturing_date,
             expiry_date=expiry_date,
             mrp=item_data.mrp,
-            free_quantity=item_data.free_quantity,
             unit_price=item_data.unit_price,
+            selling_price=item_data.selling_price,
+            profit_margin=item_data.profit_margin,
+            discount_on_purchase=item_data.discount_on_purchase,
+            discount_on_sales=item_data.discount_on_sales,
             discount_percent=item_data.discount_percent,
             discount_amount=item_data.discount_amount,
+            before_discount=item_data.before_discount,
             taxable_amount=item_data.taxable_amount,
             cgst_percent=item_data.cgst_percent,
             cgst_amount=item_data.cgst_amount,
@@ -544,3 +606,18 @@ def search_items(
     items = query.offset(skip).limit(limit).all()
     
     return items
+
+@router.get("/fields-guide")
+def get_fields_guide():
+    """Get invoice fields documentation"""
+    import os
+    guide_path = os.path.join(os.path.dirname(__file__), "INVOICE_FIELDS_GUIDE.md")
+    
+    try:
+        with open(guide_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        return {"content": content, "format": "markdown"}
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Fields guide not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error reading guide: {str(e)}")

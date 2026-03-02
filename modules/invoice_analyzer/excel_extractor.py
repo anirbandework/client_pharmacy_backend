@@ -103,26 +103,34 @@ class ExcelInvoiceExtractor:
         
         # Map common column names
         col_mapping = {
-            "product_name": ["product_name", "product", "item_name", "item", "medicine_name", "medicine"],
+            "product_name": ["product_name", "product", "item_name", "item", "medicine_name", "medicine", "brand name"],
+            "composition": ["composition", "generic_name", "salt", "brand or generic"],
             "manufacturer": ["manufacturer", "mfg", "mfg_code"],
             "hsn_code": ["hsn_code", "hsn", "hsn_sac"],
             "batch_number": ["batch_number", "batch", "batch_no"],
             "quantity": ["quantity", "qty", "qnty"],
-            "package": ["package", "pkg", "pack"],
-            "expiry_date": ["expiry_date", "expiry", "exp_date", "exp"],
+            "package": ["package", "pkg", "pack", "conversion"],
+            "unit": ["unit", "uom", "unit_of_measure"],
+            "manufacturing_date": ["manufacturing_date", "manufacturing date", "mfg_date", "mfg date", "mfg date"],
+            "expiry_date": ["expiry_date", "expiry", "exp_date", "exp", "exp date"],
             "mrp": ["mrp", "max_retail_price"],
+            "selling_price": ["selling_price", "selling price", "sale_price", "sales_price"],
+            "profit_margin": ["profit_margin", "profit margin", "margin"],
+            "discount_on_purchase": ["discount_on_purchase", "discount on purchase%", "purchase_discount", "discount_on_purchase%"],
+            "discount_on_sales": ["discount_on_sales", "discount on sales%", "sales_discount", "discount_on_sales%"],
             "free_quantity": ["free_quantity", "free_qty", "free"],
-            "unit_price": ["unit_price", "rate", "price", "unit_rate"],
+            "unit_price": ["unit_price", "rate", "price", "unit_rate", "rate per unit"],
+            "before_discount": ["before_discount", "before discount", "amount_before_discount", "gross_amount"],
             "discount_percent": ["discount_percent", "disc_%", "discount%"],
             "discount_amount": ["discount_amount", "discount", "disc_amt"],
-            "taxable_amount": ["taxable_amount", "taxable", "amount", "amt"],
-            "cgst_percent": ["cgst_percent", "cgst%", "cgst_rate"],
-            "cgst_amount": ["cgst_amount", "cgst", "cgst_amt"],
-            "sgst_percent": ["sgst_percent", "sgst%", "sgst_rate"],
-            "sgst_amount": ["sgst_amount", "sgst", "sgst_amt"],
+            "taxable_amount": ["taxable_amount", "taxable", "amount", "amt", "taxable amount", "taxable rate"],
+            "cgst_percent": ["cgst_percent", "cgst%", "cgst_rate", "cgst %"],
+            "cgst_amount": ["cgst_amount", "cgst", "cgst_amt", "cgst amount"],
+            "sgst_percent": ["sgst_percent", "sgst%", "sgst_rate", "sgst %"],
+            "sgst_amount": ["sgst_amount", "sgst", "sgst_amt", "sgst amount"],
             "igst_percent": ["igst_percent", "igst%", "igst_rate"],
             "igst_amount": ["igst_amount", "igst", "igst_amt"],
-            "total_amount": ["total_amount", "total", "total_amt", "net_amount"]
+            "taxed_amount": ["taxed_amount", "taxed amount", "total_with_tax", "total_amount", "total", "total_amt", "net_amount", "total payable"]
         }
         
         # Find actual column names
@@ -142,16 +150,24 @@ class ExcelInvoiceExtractor:
             
             # Extract item data
             item = {
+                "composition": ExcelInvoiceExtractor._safe_get(row, actual_cols.get("composition")),
                 "manufacturer": ExcelInvoiceExtractor._safe_get(row, actual_cols.get("manufacturer")),
                 "hsn_code": ExcelInvoiceExtractor._safe_get(row, actual_cols.get("hsn_code")),
                 "product_name": str(row[product_col]).strip(),
                 "batch_number": ExcelInvoiceExtractor._safe_get(row, actual_cols.get("batch_number")),
                 "quantity": ExcelInvoiceExtractor._safe_float(row, actual_cols.get("quantity"), 1.0),
                 "package": ExcelInvoiceExtractor._safe_get(row, actual_cols.get("package")),
+                "unit": ExcelInvoiceExtractor._safe_get(row, actual_cols.get("unit")),
+                "manufacturing_date": ExcelInvoiceExtractor._safe_date(row, actual_cols.get("manufacturing_date")),
                 "expiry_date": ExcelInvoiceExtractor._safe_date(row, actual_cols.get("expiry_date")),
                 "mrp": ExcelInvoiceExtractor._safe_get(row, actual_cols.get("mrp")),
+                "selling_price": ExcelInvoiceExtractor._safe_float(row, actual_cols.get("selling_price"), 0.0),
+                "profit_margin": ExcelInvoiceExtractor._safe_float(row, actual_cols.get("profit_margin"), 0.0),
+                "discount_on_purchase": ExcelInvoiceExtractor._safe_float(row, actual_cols.get("discount_on_purchase"), 0.0),
+                "discount_on_sales": ExcelInvoiceExtractor._safe_float(row, actual_cols.get("discount_on_sales"), 0.0),
                 "free_quantity": ExcelInvoiceExtractor._safe_float(row, actual_cols.get("free_quantity"), 0.0),
                 "unit_price": ExcelInvoiceExtractor._safe_float(row, actual_cols.get("unit_price"), 0.0),
+                "before_discount": ExcelInvoiceExtractor._safe_float(row, actual_cols.get("before_discount"), 0.0),
                 "discount_percent": ExcelInvoiceExtractor._safe_float(row, actual_cols.get("discount_percent"), 0.0),
                 "discount_amount": ExcelInvoiceExtractor._safe_float(row, actual_cols.get("discount_amount"), 0.0),
                 "taxable_amount": ExcelInvoiceExtractor._safe_float(row, actual_cols.get("taxable_amount"), 0.0),
@@ -161,12 +177,18 @@ class ExcelInvoiceExtractor:
                 "sgst_amount": ExcelInvoiceExtractor._safe_float(row, actual_cols.get("sgst_amount"), 0.0),
                 "igst_percent": ExcelInvoiceExtractor._safe_float(row, actual_cols.get("igst_percent"), 0.0),
                 "igst_amount": ExcelInvoiceExtractor._safe_float(row, actual_cols.get("igst_amount"), 0.0),
-                "total_amount": ExcelInvoiceExtractor._safe_float(row, actual_cols.get("total_amount"), 0.0)
+                "total_amount": ExcelInvoiceExtractor._safe_float(row, actual_cols.get("taxed_amount"), 0.0)
             }
             
             # Auto-calculate if missing
+            if item["before_discount"] == 0.0 and item["unit_price"] > 0:
+                item["before_discount"] = item["quantity"] * item["unit_price"]
+            
             if item["taxable_amount"] == 0.0:
-                item["taxable_amount"] = item["quantity"] * item["unit_price"]
+                if item["before_discount"] > 0:
+                    item["taxable_amount"] = item["before_discount"] - item["discount_amount"]
+                else:
+                    item["taxable_amount"] = item["quantity"] * item["unit_price"]
             
             if item["cgst_amount"] == 0.0 and item["cgst_percent"] > 0:
                 item["cgst_amount"] = (item["taxable_amount"] * item["cgst_percent"]) / 100

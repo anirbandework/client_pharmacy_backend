@@ -80,16 +80,24 @@ Extract ALL data from this invoice. Return ONLY valid JSON (no markdown):
   "supplier_phone": "phone number or null",
   "items": [
     {{
-      "manufacturer": "Mfg code or null",
+      "composition": "generic/salt name (e.g., Paracetamol 500mg) or null",
+      "manufacturer": "Mfg code (e.g., CIPLA, SUN) or null",
       "hsn_code": "HSN code",
-      "product_name": "product name",
+      "product_name": "brand/product name",
       "batch_number": "batch",
       "quantity": number,
       "package": "Pkg value like '10 X 6' or null",
-      "expiry_date": "MM/YYYY",
+      "unit": "unit type (Box, Strip, Bottle, etc.) or null",
+      "manufacturing_date": "MM/YYYY or DD/MM/YYYY or null",
+      "expiry_date": "MM/YYYY or DD/MM/YYYY",
       "mrp": "exact MRP text like '69.00/STRIP' or '299.00/STRIP' or null",
+      "selling_price": 0,
+      "profit_margin": 0,
+      "discount_on_purchase": 0,
+      "discount_on_sales": 0,
       "free_quantity": 0,
       "unit_price": number,
+      "before_discount": 0,
       "discount_percent": 0,
       "discount_amount": 0,
       "taxable_amount": number,
@@ -112,17 +120,22 @@ Extract ALL data from this invoice. Return ONLY valid JSON (no markdown):
 
 Rules:
 - Extract ALL items from the invoice
-- IMPORTANT: Mfg and HSN are SEPARATE fields:
-  * Mfg (manufacturer) is typically 4 letters (e.g., "ELEG", "BIOD")
-  * HSN code is typically 8 digits (e.g., "30042064", "30049099")
-  * Do NOT concatenate them - keep them separate
-- Extract Pkg (package) column if present (e.g., "10 X 6", "10 x 10")
-- Extract MRP column if present - keep EXACT text as shown (e.g., "69.00/STRIP", "299.00/STRIP", "422.20/BOTTLE")
+- IMPORTANT: Separate fields properly:
+  * composition = generic/salt name (e.g., "Paracetamol 500mg", "Telmisartan 40")
+  * product_name = brand name (e.g., "Dolo 650", "Telma")
+  * manufacturer = Mfg code, typically 4 letters (e.g., "CIPLA", "SUN", "ELEG")
+  * hsn_code = HSN code, typically 8 digits (e.g., "30049099", "30042064")
+  * Do NOT concatenate manufacturer and HSN - keep them separate
+- Extract package (e.g., "10 X 6", "10 x 10") if present
+- Extract unit type (Box, Strip, Bottle, Vial, Cartridge, Piece, Tablets, Capsules, Sachet, Inhaler, gm, kg, ml, L) if present
+- Extract manufacturing_date if present (MM/YYYY or DD/MM/YYYY format)
+- Extract MRP - keep EXACT text as shown (e.g., "69.00/STRIP", "299.00/STRIP", "422.20/BOTTLE")
 - For expiry_date: Use the EXACT format from the invoice
   * If invoice shows MM/YYYY (e.g., "11/2026"), use "11/2026"
   * If invoice shows DD/MM/YYYY (e.g., "15/11/2026"), use "15/11/2026"
-  * Keep the format as-is from the source document
+- Extract selling_price, profit_margin, discount_on_purchase, discount_on_sales if present
 - Use exact amounts from the invoice
+- Calculate before_discount = quantity × unit_price (if not explicitly shown)
 - Calculate total_gst as sum of all CGST + SGST + IGST
 - If CGST/SGST are present, IGST should be 0
 - taxable_amount for items = amount before tax
@@ -162,6 +175,17 @@ Invoice:
                         item["manufacturer"] = match.group(1)
                         if not item.get("hsn_code") or item["hsn_code"] == "-":
                             item["hsn_code"] = match.group(2)
+                
+                # Auto-calculate before_discount if missing
+                if item.get("before_discount", 0) == 0 and item.get("unit_price", 0) > 0:
+                    item["before_discount"] = item.get("quantity", 0) * item.get("unit_price", 0)
+                
+                # Auto-calculate taxable_amount if missing
+                if item.get("taxable_amount", 0) == 0:
+                    if item.get("before_discount", 0) > 0:
+                        item["taxable_amount"] = item.get("before_discount", 0) - item.get("discount_amount", 0)
+                    else:
+                        item["taxable_amount"] = item.get("quantity", 0) * item.get("unit_price", 0)
             
             # Ensure total_gst is calculated
             if data.get("total_gst", 0) == 0:
@@ -301,75 +325,68 @@ Invoice:
         lines = text.split('\n')
         
         in_items = False
-        product_name = None
+        product_name_buffer = []
         
         for i, line in enumerate(lines):
             if re.search(r'H\.?S\.?N|Product Name', line, re.IGNORECASE):
                 in_items = True
                 continue
             
-            # Break only when we hit the Rupees line followed by Tax % table
             if in_items and re.search(r'^Rupees\s*:', line, re.IGNORECASE):
                 break
             
             if not in_items or not line.strip():
                 continue
             
-            # Check if line has MFG+HSN pattern (anywhere in line, with optional space)
+            # Check if line has MFG+HSN pattern and expiry date (data line)
             mfg_hsn_match = re.search(r'([A-Z]{4})\s?(\d{8})', line)
             
             if mfg_hsn_match and re.search(r'\d{2}/\d{4}', line):
-                # This line has data
                 hsn_code = mfg_hsn_match.group(2)
                 mfg_code = mfg_hsn_match.group(1)
                 
-                # Extract product name: it's between HSN and batch number
-                # Find position after HSN
+                # Try to extract product name from current line first
                 hsn_end_pos = line.find(hsn_code) + len(hsn_code)
                 after_hsn = line[hsn_end_pos:].strip()
                 
-                # Extract batch and expiry to know where product name ends
-                batch_match = re.search(r'\b([A-Z0-9-]{4,15})\b\s+\d+\s+\d{2}/\d{4}', after_hsn)
+                # Find batch number position to extract product name
+                batch_match = re.search(r'\b([A-Z0-9-]{4,15})\b\s+\d+', after_hsn)
+                product_name = None
+                
                 if batch_match:
-                    # Product name is everything before the batch
                     batch_start = after_hsn.find(batch_match.group(1))
                     extracted_name = after_hsn[:batch_start].strip()
-                    if extracted_name:
+                    if extracted_name and len(extracted_name) > 2:
                         product_name = extracted_name
-                    elif product_name and re.search(r'[A-Z]{3,}', product_name):
-                        # Use previous line if current line has no product name
-                        pass
-                    else:
-                        product_name = "Unknown Product"
-                else:
-                    # Fallback: use previous line if it looks like a product name
-                    if product_name and re.search(r'[A-Z]{3,}', product_name):
-                        pass  # Keep stored product_name
-                    else:
-                        product_name = "Unknown Product"
                 
-                # Extract batch
-                batch_match = re.search(r'\b([A-Z0-9]{5,10})\b', line)
-                batch = batch_match.group(1) if batch_match and batch_match.group(1) != hsn_code else None
+                # If no product name on current line, use buffered lines
+                if not product_name and product_name_buffer:
+                    product_name = ' '.join(product_name_buffer).strip()
                 
-                # Extract quantity (number before package or expiry)
+                # Clear buffer after using
+                product_name_buffer = []
+                
+                # Extract batch number
+                batch_match = re.search(r'\b([A-Z0-9-]{4,15})\b', after_hsn)
+                batch = batch_match.group(1) if batch_match else None
+                
+                # Extract quantity
                 qty_match = re.search(r'\b(\d+)\s+(?:(\d+\s*[xX]\s*\d+)|\d{2}/\d{4})', line)
                 quantity = float(qty_match.group(1)) if qty_match else 1.0
                 
-                # Extract package (e.g., "10 X 6" or "10 x 10")
-                pkg_match = re.search(r'(\d+\s*[xX]\s*\d+)', line)
+                # Extract package
+                pkg_match = re.search(r'(\d+\s*[xX]\s*\d+|\d+\s*(?:ML|GMS|GM))', line, re.IGNORECASE)
                 package = pkg_match.group(1) if pkg_match else None
                 
-                # Extract MRP (e.g., "69.00/STRIP" or "299.00/STRIP")
-                # Look for pattern: number/UNIT but NOT if preceded by expiry date pattern
-                mrp_match = re.search(r'(?<!\d{2}/\d{4}\s)([\d.]+/(?:STRIP|BOTTLE|PACK|TUBE|BOX))', line)
+                # Extract MRP
+                mrp_match = re.search(r'([\d.]+/(?:STRIP|BOTTLE|PACK|TUBE|BOX|PIECE))', line, re.IGNORECASE)
                 mrp = mrp_match.group(1) if mrp_match else None
                 
-                # Extract expiry (MM/YYYY format)
+                # Extract expiry
                 expiry_match = re.search(r'(\d{2}/\d{4})', line)
                 expiry = expiry_match.group(1) if expiry_match else None
                 
-                # Fix concatenated numbers
+                # Fix concatenated numbers and extract amounts
                 line_fixed = re.sub(r'(\d\.\d{2})(\d)', r'\1 \2', line)
                 amounts = [float(a.replace(',', '')) for a in re.findall(r'([\d,]+\.\d+)', line_fixed)]
                 
@@ -382,16 +399,24 @@ Invoice:
                     rate = amounts[-6]
                     
                     items.append({
+                        "composition": None,
                         "manufacturer": mfg_code,
                         "hsn_code": hsn_code,
                         "product_name": product_name,
                         "batch_number": batch,
                         "quantity": quantity,
                         "package": package,
+                        "unit": None,
+                        "manufacturing_date": None,
                         "expiry_date": expiry,
                         "mrp": mrp,
+                        "selling_price": 0,
+                        "profit_margin": 0,
+                        "discount_on_purchase": 0,
+                        "discount_on_sales": 0,
                         "free_quantity": 0,
                         "unit_price": rate / quantity if quantity > 0 else rate,
+                        "before_discount": 0,
                         "discount_percent": 0,
                         "discount_amount": 0,
                         "taxable_amount": amount,
@@ -403,10 +428,10 @@ Invoice:
                         "igst_amount": 0,
                         "total_amount": amount + cgst_amt + sgst_amt
                     })
-                    product_name = None
             else:
-                # Store as potential product name
-                if re.search(r'[A-Z]{3,}', line):
-                    product_name = line.strip()
+                # Buffer potential product name lines
+                clean_line = line.strip()
+                if clean_line and re.search(r'[A-Z]', clean_line) and not re.search(r'^\d+$', clean_line):
+                    product_name_buffer.append(clean_line)
         
         return items

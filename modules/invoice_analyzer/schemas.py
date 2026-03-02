@@ -4,18 +4,26 @@ from datetime import date, datetime
 
 class PurchaseInvoiceItemUpdate(BaseModel):
     id: Optional[int] = None
+    composition: Optional[str] = None
     manufacturer: Optional[str] = None
     hsn_code: Optional[str] = None
-    product_name: str
+    product_name: Optional[str] = None
     batch_number: Optional[str] = None
     quantity: float
+    free_quantity: float = 0.0
     package: Optional[str] = None
+    unit: Optional[str] = None
+    manufacturing_date: Optional[date] = None
     expiry_date: Optional[date] = None
     mrp: Optional[str] = None
-    free_quantity: float = 0.0
     unit_price: float
+    selling_price: float = 0.0
+    profit_margin: float = 0.0
+    discount_on_purchase: float = 0.0
+    discount_on_sales: float = 0.0
     discount_percent: float = 0.0
     discount_amount: float = 0.0
+    before_discount: float = 0.0
     taxable_amount: float
     cgst_percent: float = 0.0
     cgst_amount: float = 0.0
@@ -46,18 +54,26 @@ class PurchaseInvoiceUpdate(BaseModel):
 
 class PurchaseInvoiceItemResponse(BaseModel):
     id: int
+    composition: Optional[str]
     manufacturer: Optional[str]
     hsn_code: Optional[str]
-    product_name: str
+    product_name: Optional[str]
     batch_number: Optional[str]
     quantity: float
+    free_quantity: float
     package: Optional[str]
+    unit: Optional[str]
+    manufacturing_date: Optional[date]
     expiry_date: Optional[date]
     mrp: Optional[str]
-    free_quantity: float
     unit_price: float
+    selling_price: float
+    profit_margin: float
+    discount_on_purchase: float
+    discount_on_sales: float
     discount_percent: float
     discount_amount: float
+    before_discount: float
     taxable_amount: float
     cgst_percent: float
     cgst_amount: float

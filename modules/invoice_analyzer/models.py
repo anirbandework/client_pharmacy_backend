@@ -63,18 +63,39 @@ class PurchaseInvoiceItem(Base):
     invoice_id = Column(Integer, ForeignKey("purchase_invoices.id"), nullable=False)
     shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False, index=True)
     
+    # Product identification
+    composition = Column(String, nullable=True)
     manufacturer = Column(String, nullable=True)
     hsn_code = Column(String, nullable=True)
-    product_name = Column(String, nullable=False)
+    product_name = Column(String, nullable=True)  # Changed to nullable
     batch_number = Column(String, nullable=True)
+    
+    # Quantities
     quantity = Column(Float, nullable=False)
-    package = Column(String, nullable=True)
-    expiry_date = Column(Date, nullable=True)
-    mrp = Column(String, nullable=True)
     free_quantity = Column(Float, default=0.0)
+    
+    # Packaging
+    package = Column(String, nullable=True)
+    unit = Column(String, nullable=True)
+    
+    # Dates
+    manufacturing_date = Column(Date, nullable=True)
+    expiry_date = Column(Date, nullable=True)
+    
+    # Pricing
+    mrp = Column(String, nullable=True)
     unit_price = Column(Float, nullable=False)
+    selling_price = Column(Float, default=0.0)
+    profit_margin = Column(Float, default=0.0)
+    
+    # Discounts
+    discount_on_purchase = Column(Float, default=0.0)
+    discount_on_sales = Column(Float, default=0.0)
     discount_percent = Column(Float, default=0.0)
     discount_amount = Column(Float, default=0.0)
+    before_discount = Column(Float, default=0.0)
+    
+    # Tax
     taxable_amount = Column(Float, nullable=False)
     cgst_percent = Column(Float, default=0.0)
     cgst_amount = Column(Float, default=0.0)
