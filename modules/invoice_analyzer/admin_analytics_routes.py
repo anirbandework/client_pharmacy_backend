@@ -29,6 +29,12 @@ def get_ai_analytics(
     - Procurement trends
     - Strategic recommendations
     """
+    from app.utils.cache import dashboard_cache
+    
+    cache_key = f"ai_analytics:{admin.organization_id}:{shop_id}:{start_date}:{end_date}"
+    cached = dashboard_cache.get(cache_key, ttl_seconds=3600)
+    if cached:
+        return cached
     
     analytics_service = InvoiceAIAnalytics()
     
@@ -40,6 +46,7 @@ def get_ai_analytics(
         end_date=end_date
     )
     
+    dashboard_cache.set(cache_key, result)
     return result
 
 @router.get("/admin/expiry-alerts")
@@ -259,6 +266,12 @@ def get_dashboard_analytics(
     admin: Admin = Depends(get_current_admin)
 ):
     """Get comprehensive dashboard analytics with chart-ready data (Admin only)"""
+    from app.utils.cache import dashboard_cache
+    
+    cache_key = f"dashboard:{admin.organization_id}:{shop_id}:{start_date}:{end_date}"
+    cached = dashboard_cache.get(cache_key, ttl_seconds=60)
+    if cached:
+        return cached
     
     analytics = DashboardAnalytics.get_comprehensive_analytics(
         db=db,
@@ -268,6 +281,7 @@ def get_dashboard_analytics(
         end_date=end_date
     )
     
+    dashboard_cache.set(cache_key, analytics)
     return analytics
 
 @router.get("/admin/pending-verification")

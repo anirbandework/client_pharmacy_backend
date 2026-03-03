@@ -227,10 +227,10 @@ async def upload_invoice_pdf(
     
     return invoice
 
-@router.get("/", response_model=List[schemas.PurchaseInvoiceListResponse])
+@router.get("/")
 def get_invoices(
     skip: int = 0,
-    limit: int = 100,
+    limit: int = 20,
     supplier_name: Optional[str] = None,
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
@@ -586,7 +586,7 @@ def search_items(
     product_name: Optional[str] = None,
     batch_number: Optional[str] = None,
     skip: int = 0,
-    limit: int = 100,
+    limit: int = 50,
     db: Session = Depends(get_db),
     current_user: tuple = Depends(get_current_user)
 ):

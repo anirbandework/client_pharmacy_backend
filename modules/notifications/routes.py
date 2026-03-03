@@ -4,6 +4,7 @@ from app.database.database import get_db
 from typing import List
 from modules.auth.dependencies import get_current_admin, get_current_staff
 from modules.auth.models import Admin, Staff
+from app.utils.cache import dashboard_cache
 from . import schemas
 from .service import NotificationService
 
@@ -65,17 +66,24 @@ def get_notification_stats(
     admin: Admin = Depends(get_current_admin),
     db: Session = Depends(get_db)
 ):
-    """Get read statistics for notification"""
+    """Get read statistics for notification (cached)"""
+    cache_key = f"notif_stats:{notification_id}"
+    cached = dashboard_cache.get(cache_key, ttl_seconds=60)
+    if cached:
+        return cached
+    
     stats = NotificationService.get_notification_stats(db, notification_id)
     if not stats:
         raise HTTPException(status_code=404, detail="Notification not found")
     
-    return schemas.NotificationStats(
+    result = schemas.NotificationStats(
         total_sent=1,
         total_recipients=stats["total_recipients"],
         total_read=stats["total_read"],
         read_percentage=stats["read_percentage"]
     )
+    dashboard_cache.set(cache_key, result)
+    return result
 
 # STAFF ENDPOINTS
 
@@ -84,9 +92,10 @@ def get_staff_notifications(
     staff: Staff = Depends(get_current_staff),
     db: Session = Depends(get_db),
     include_read: bool = False,
-    limit: int = 50
+    limit: int = 20,
+    offset: int = 0
 ):
-    """Get notifications for staff"""
+    """Get notifications for staff with pagination"""
     notifications_data = NotificationService.get_staff_notifications(
         db, staff, include_read, limit
     )
@@ -131,8 +140,12 @@ def get_unread_count(
     staff: Staff = Depends(get_current_staff),
     db: Session = Depends(get_db)
 ):
-    """Get count of unread notifications"""
-    notifications_data = NotificationService.get_staff_notifications(
-        db, staff, include_read=False, limit=1000
-    )
-    return {"unread_count": len(notifications_data)}
+    """Get count of unread notifications (cached)"""
+    cache_key = f"unread_count:{staff.id}"
+    cached = dashboard_cache.get(cache_key, ttl_seconds=30)
+    if cached is not None:
+        return {"unread_count": cached}
+    
+    count = NotificationService.get_unread_count_optimized(db, staff)
+    dashboard_cache.set(cache_key, count)
+    return {"unread_count": count}

@@ -5,71 +5,137 @@ from app.services.redis_service import redis_service
 import time
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    """Rate limiting middleware with different limits for different endpoints"""
+    """User-type-based rate limiting optimized for 100k users"""
     
-    RATE_LIMITS = {
-        # Authentication endpoints - stricter limits
-        "/api/auth/login": {"limit": 5, "window": 300},  # 5 attempts per 5 minutes
-        "/api/auth/register": {"limit": 3, "window": 3600},  # 3 per hour
-        
-        # Billing endpoints - moderate limits
-        "/api/billing": {"limit": 100, "window": 60},  # 100 per minute
-        
-        # Customer tracking - moderate limits  
-        "/api/customer-tracking": {"limit": 50, "window": 60},
-        
-        # Stock operations - higher limits
-        "/api/stock-audit": {"limit": 200, "window": 60},
-        
-        # Attendance WiFi status - very high limit for frequent polling
-        "/api/attendance/wifi/status": {"limit": 1000, "window": 60},
-        
-        # Feedback unread count - high limit for frequent polling
-        "/api/feedback/my-feedback/unread-count": {"limit": 1000, "window": 60},
-        
-        # Invoice upload - higher limit for file uploads
-        "/api/purchase-invoices/upload": {"limit": 20, "window": 60},
-        
-        # Default for all other endpoints
-        "default": {"limit": 1000, "window": 60}  # 1000 per minute
+    # User type limits (requests per minute)
+    USER_TYPE_LIMITS = {
+        "super_admin": 500,
+        "admin": 300,
+        "staff": 100,
+        "anonymous": 20
     }
     
+    # Endpoint-specific overrides
+    ENDPOINT_LIMITS = {
+        # Auth endpoints
+        "/api/auth/login": {"limit": 5, "window": 300},
+        "/api/auth/register": {"limit": 3, "window": 3600},
+        "/api/purchase-invoices/upload": {"limit": 10, "window": 60},
+        
+        # OTP endpoints - prevent SMS spam and brute force (Admin and Staff only)
+        "/api/auth/otp/send": {"limit": 3, "window": 300},
+        "/api/auth/otp/verify": {"limit": 5, "window": 300},
+        "/api/auth/admin/send-otp": {"limit": 3, "window": 300},
+        "/api/auth/admin/otp/verify": {"limit": 5, "window": 300},
+        "/api/auth/staff/send-otp": {"limit": 3, "window": 300},
+        "/api/auth/staff/otp/verify": {"limit": 5, "window": 300},
+        
+        # Heavy query endpoints - prevent database overload
+        "/api/invoice-analyzer/admin/ai-analytics": {"limit": 10, "window": 60},
+        "/api/invoice-analyzer/admin/dashboard-analytics": {"limit": 10, "window": 60}
+    }
+    
+    # High-frequency endpoints (lightweight rate limiting)
+    HIGH_FREQUENCY_LIMITS = {
+        "/api/attendance/wifi/heartbeat": {"limit": 2, "window": 60},  # 2/min = every 30s (matches heartbeat)
+        "/api/attendance/wifi/status": {"limit": 30, "window": 60},    # 30/min = every 2s (reduced from 120)
+        "/api/notifications/staff/unread-count": {"limit": 30, "window": 60}  # 30/min = every 2s (reduced from 120)
+    }
+    
+    # Skip rate limiting entirely
+    SKIP_RATE_LIMIT = [
+        "/", "/health", "/modules",
+        # SuperAdmin endpoints - no rate limits for superadmins
+        "/api/auth/super-admin/send-otp",
+        "/api/auth/super-admin/verify-otp",
+        "/api/auth/super-admin/login",
+        "/api/auth/super-admin/register",
+        "/api/auth/super-admin/me",
+        "/api/auth/super-admin/dashboard",
+        "/api/auth/super-admin/analytics",
+        "/api/auth/super-admin/admins",
+        "/api/auth/super-admin/shops",
+        "/api/auth/super-admin/staff",
+        "/api/auth/super-admin/organizations"
+    ]
+    
+    def _create_rate_limit_response(self, retry_after: int):
+        """Create a properly formatted 429 response with CORS headers"""
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "Rate limit exceeded", "error": "Too many requests"},
+            headers={
+                "Retry-After": str(retry_after),
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Credentials": "true",
+                "Access-Control-Allow-Methods": "*",
+                "Access-Control-Allow-Headers": "*"
+            }
+        )
+    
     async def dispatch(self, request: Request, call_next):
-        # Skip rate limiting for health checks, OPTIONS requests, and frequent polling endpoints
-        skip_paths = [
-            "/", "/health", "/modules",
-            "/api/attendance/wifi/status",
-            "/api/attendance/wifi/heartbeat",
-            "/api/feedback/my-feedback/unread-count"
-        ]
-        if request.url.path in skip_paths or request.method == "OPTIONS":
+        if request.url.path in self.SKIP_RATE_LIMIT or request.method == "OPTIONS":
             return await call_next(request)
         
-        # Get client identifier (IP + user_id if authenticated)
+        # Extract user_type from JWT token directly (middleware order issue)
+        user_type = 'anonymous'
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            try:
+                from modules.auth.service import AuthService
+                token = auth_header.split(" ")[1]
+                token_data = AuthService.decode_token(token)
+                if token_data:
+                    user_type = token_data.user_type
+                    user_id = token_data.user_id
+                    org_id = getattr(token_data, 'organization_id', None)
+                else:
+                    user_id = None
+                    org_id = None
+            except:
+                user_id = None
+                org_id = None
+        else:
+            user_id = getattr(request.state, 'user_id', None)
+            org_id = getattr(request.state, 'organization_id', None)
+        
         client_ip = request.client.host
-        user_id = getattr(request.state, 'user_id', None)
-        client_key = f"{client_ip}:{user_id}" if user_id else client_ip
         
-        # Determine rate limit for this endpoint
-        endpoint_config = self._get_rate_limit_config(request.url.path)
-        rate_limit_key = f"rate_limit:{request.url.path}:{client_key}"
+        # Skip rate limiting for SuperAdmins entirely
+        if user_type == 'super_admin':
+            return await call_next(request)
         
-        # Check rate limit
-        if not await redis_service.check_rate_limit(
-            rate_limit_key, 
-            endpoint_config["limit"], 
-            endpoint_config["window"]
-        ):
-            return JSONResponse(
-                status_code=429,
-                content={"detail": f"Rate limit exceeded. Max {endpoint_config['limit']} requests per {endpoint_config['window']} seconds"}
-            )
+        # High-frequency endpoints (lightweight limits)
+        if request.url.path in self.HIGH_FREQUENCY_LIMITS:
+            config = self.HIGH_FREQUENCY_LIMITS[request.url.path]
+            key = f"rl:hf:{request.url.path}:{user_id or client_ip}"
+            if not await redis_service.check_rate_limit(key, config["limit"], config["window"]):
+                return self._create_rate_limit_response(config["window"])
+            return await call_next(request)  # Skip other checks for performance
+        
+        # Endpoint-specific limits (use user_id if available, else IP)
+        if request.url.path in self.ENDPOINT_LIMITS:
+            config = self.ENDPOINT_LIMITS[request.url.path]
+            key = f"rl:ep:{request.url.path}:{user_id or client_ip}"
+            if not await redis_service.check_rate_limit(key, config["limit"], config["window"]):
+                return self._create_rate_limit_response(config["window"])
+        
+        # User-level rate limit (authenticated users)
+        if user_id:
+            limit = self.USER_TYPE_LIMITS.get(user_type, 100)
+            key = f"rl:u:{user_id}"
+            if not await redis_service.check_rate_limit(key, limit, 60):
+                return self._create_rate_limit_response(60)
+        else:
+            # Anonymous users - IP-based rate limit
+            key = f"rl:anon:{client_ip}"
+            if not await redis_service.check_rate_limit(key, self.USER_TYPE_LIMITS["anonymous"], 60):
+                return self._create_rate_limit_response(60)
+        
+        # Organization-level rate limit
+        if org_id:
+            key = f"rl:org:{org_id}"
+            if not await redis_service.check_rate_limit(key, 5000, 60):
+                return self._create_rate_limit_response(60)
         
         return await call_next(request)
-    
-    def _get_rate_limit_config(self, path: str) -> dict:
-        """Get rate limit configuration for a specific path"""
-        for endpoint, config in self.RATE_LIMITS.items():
-            if endpoint != "default" and path.startswith(endpoint):
-                return config
-        return self.RATE_LIMITS["default"]

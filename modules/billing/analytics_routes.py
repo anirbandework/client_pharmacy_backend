@@ -7,6 +7,7 @@ from typing import List, Dict, Any
 from .daily_records_models import DailyRecord, DailyExpense
 from .models import Bill
 from .dependencies import get_current_user_with_geofence as get_current_user
+from app.utils.cache import dashboard_cache
 
 router = APIRouter()
 
@@ -18,6 +19,11 @@ def get_analytics_overview(
 ):
     """Get comprehensive analytics overview"""
     staff, shop_id = current_user
+    
+    cache_key = f"billing_analytics:{shop_id}:{days}"
+    cached = dashboard_cache.get(cache_key)
+    if cached is not None:
+        return cached
     
     end_date = date.today()
     start_date = end_date - timedelta(days=days)
@@ -91,7 +97,7 @@ def get_analytics_overview(
     else:
         prediction_next_7_days = avg_daily_sales * 7
     
-    return {
+    result = {
         "summary": {
             "period_days": days,
             "total_sales": round(total_sales, 2),
@@ -110,6 +116,8 @@ def get_analytics_overview(
             "avg_daily_prediction": round(prediction_next_7_days / 7, 2)
         }
     }
+    dashboard_cache.set(cache_key, result, ttl=60)
+    return result
 
 @router.get("/analytics/comparison")
 def get_period_comparison(
@@ -119,6 +127,11 @@ def get_period_comparison(
 ):
     """Compare current period with previous period"""
     staff, shop_id = current_user
+    
+    cache_key = f"billing_comparison:{shop_id}:{current_days}"
+    cached = dashboard_cache.get(cache_key)
+    if cached is not None:
+        return cached
     
     end_date = date.today()
     current_start = end_date - timedelta(days=current_days)
@@ -155,7 +168,7 @@ def get_period_comparison(
             return 100 if curr > 0 else 0
         return ((curr - prev) / prev) * 100
     
-    return {
+    result = {
         "current_period": {
             "days": current_days,
             "sales": round(current["sales"], 2),
@@ -174,3 +187,5 @@ def get_period_comparison(
             "expenses_change": round(calc_change(current["expenses"], previous["expenses"]), 2)
         }
     }
+    dashboard_cache.set(cache_key, result, ttl=60)
+    return result

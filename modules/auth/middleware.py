@@ -6,7 +6,6 @@ class ShopContextMiddleware(BaseHTTPMiddleware):
     """Middleware to inject shop context into request state"""
     
     async def dispatch(self, request: Request, call_next):
-        # Extract token from Authorization header
         auth_header = request.headers.get("Authorization")
         
         if auth_header and auth_header.startswith("Bearer "):
@@ -16,15 +15,18 @@ class ShopContextMiddleware(BaseHTTPMiddleware):
             if token_data:
                 request.state.user_id = token_data.user_id
                 request.state.user_type = token_data.user_type
-                request.state.shop_code = token_data.shop_code  # Changed from shop_id to shop_code
+                request.state.shop_code = token_data.shop_code
+                request.state.organization_id = getattr(token_data, 'organization_id', None)
             else:
                 request.state.user_id = None
                 request.state.user_type = None
                 request.state.shop_code = None
+                request.state.organization_id = None
         else:
             request.state.user_id = None
             request.state.user_type = None
             request.state.shop_code = None
+            request.state.organization_id = None
         
         response = await call_next(request)
         return response

@@ -27,9 +27,10 @@ class StaffDevice(Base):
     id = Column(Integer, primary_key=True, index=True)
     shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False, index=True)
     staff_id = Column(Integer, ForeignKey("staff.id"), nullable=False, index=True)
-    mac_address = Column(String(17), unique=True, index=True, nullable=False)  # Format: AA:BB:CC:DD:EE:FF
+    mac_address = Column(String(17), unique=True, index=True, nullable=True)  # Format: AA:BB:CC:DD:EE:FF
     device_name = Column(String(100), nullable=True)  # e.g., "iPhone 12", "Samsung Galaxy"
     is_active = Column(Boolean, default=True)
+    is_inside_geofence = Column(Boolean, default=False)
     registered_at = Column(DateTime, default=datetime.now)
     last_seen = Column(DateTime, nullable=True)
     

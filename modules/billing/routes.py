@@ -9,6 +9,7 @@ from .dependencies import get_current_user_with_geofence as get_current_user
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from io import BytesIO
+from app.utils.cache import dashboard_cache
 
 router = APIRouter()
 
@@ -56,7 +57,7 @@ def get_bills(
     end_date: Optional[date] = None,
     customer_phone: Optional[str] = None,
     skip: int = 0,
-    limit: int = 100,
+    limit: int = 50,
     db: Session = Depends(get_db),
     current_user: tuple = Depends(get_current_user)
 ):
@@ -173,7 +174,7 @@ def get_top_selling_items(
 @router.get("/customer-history/{customer_phone}")
 def get_customer_history(
     customer_phone: str,
-    limit: int = Query(50, le=200),
+    limit: int = Query(50, le=100),
     db: Session = Depends(get_db),
     current_user: tuple = Depends(get_current_user)
 ):

@@ -8,6 +8,7 @@ from . import schemas, models
 from .service import AuthService
 from .dependencies import get_current_admin, get_current_staff, get_current_super_admin, require_permission
 from .otp import OTPService, SendOTPRequest, VerifyOTPRequest, OTPResponse
+from app.utils.cache import dashboard_cache
 
 router = APIRouter()
 
@@ -207,6 +208,12 @@ def get_analytics(
     db: Session = Depends(get_db)
 ):
     """Get analytics data for charts and graphs"""
+    
+    # Check cache (60 second TTL)
+    cached = dashboard_cache.get("analytics", ttl_seconds=60)
+    if cached:
+        return cached
+    
     from sqlalchemy import func
     from datetime import datetime, timedelta
     
@@ -274,6 +281,10 @@ def get_analytics(
             "staff": recent_staff
         }
     }
+    
+    # Cache result
+    dashboard_cache.set("analytics", result)
+    return result
 
 @router.get("/super-admin/dashboard")
 def get_dashboard(
@@ -281,6 +292,12 @@ def get_dashboard(
     db: Session = Depends(get_db)
 ):
     """Get hierarchical dashboard data grouped by organization"""
+    
+    # Check cache (60 second TTL)
+    cached = dashboard_cache.get("dashboard", ttl_seconds=60)
+    if cached:
+        return cached
+    
     from sqlalchemy import func
     
     # Get all unique organizations
@@ -364,6 +381,8 @@ def get_dashboard(
         
         dashboard_data["organizations"].append(org_data)
     
+    # Cache result
+    dashboard_cache.set("dashboard", dashboard_data)
     return dashboard_data
 
 @router.get("/super-admin/organizations")

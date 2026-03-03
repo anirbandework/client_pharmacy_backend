@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, or_, func
 from typing import List, Optional
 from datetime import datetime
 from .models import (
@@ -10,6 +10,47 @@ from modules.auth.models import Admin, Staff, Shop
 from . import schemas
 
 class NotificationService:
+    
+    @staticmethod
+    def get_unread_count_optimized(db: Session, staff: Staff) -> int:
+        """Optimized unread count with single COUNT query"""
+        read_ids_subquery = db.query(NotificationRead.notification_id).filter(
+            NotificationRead.staff_id == staff.id
+        ).subquery()
+        
+        shop_count = db.query(func.count(Notification.id)).filter(
+            and_(
+                Notification.target_type == NotificationTargetType.SHOP,
+                Notification.id.in_(
+                    db.query(NotificationShopTarget.notification_id).filter(
+                        NotificationShopTarget.shop_id == staff.shop_id
+                    )
+                ),
+                ~Notification.id.in_(read_ids_subquery),
+                or_(
+                    Notification.expires_at.is_(None),
+                    Notification.expires_at > datetime.now()
+                )
+            )
+        ).scalar() or 0
+        
+        staff_count = db.query(func.count(Notification.id)).filter(
+            and_(
+                Notification.target_type == NotificationTargetType.STAFF,
+                Notification.id.in_(
+                    db.query(NotificationStaffTarget.notification_id).filter(
+                        NotificationStaffTarget.staff_id == staff.id
+                    )
+                ),
+                ~Notification.id.in_(read_ids_subquery),
+                or_(
+                    Notification.expires_at.is_(None),
+                    Notification.expires_at > datetime.now()
+                )
+            )
+        ).scalar() or 0
+        
+        return shop_count + staff_count
     
     @staticmethod
     def create_notification(

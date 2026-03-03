@@ -3,8 +3,7 @@ from sqlalchemy.orm import Session
 from app.database.database import get_db
 from modules.auth.dependencies import get_current_user as get_user_dict
 from modules.auth.models import Staff, Shop
-from modules.auth.attendance.models import AttendanceRecord, AttendanceSettings
-from datetime import date
+from modules.auth.attendance.models import StaffDevice, AttendanceSettings
 
 def get_current_user_with_geofence(user_dict: dict = Depends(get_user_dict), db: Session = Depends(get_db)) -> tuple[Staff, int]:
     """Extract staff user and verify they are within geofence"""
@@ -33,19 +32,21 @@ def get_current_user_with_geofence(user_dict: dict = Depends(get_user_dict), db:
     if settings and settings.allow_any_network:
         return staff, shop.id
     
-    # Check if staff is checked in today
-    today = date.today()
-    attendance = db.query(AttendanceRecord).filter(
-        AttendanceRecord.staff_id == staff.id,
-        AttendanceRecord.shop_id == shop.id,
-        AttendanceRecord.date == today
+    # If WiFi enforcement is disabled, skip check
+    if settings and not settings.require_wifi_for_modules:
+        return staff, shop.id
+    
+    # Check if staff device is inside geofence
+    staff_device = db.query(StaffDevice).filter(
+        StaffDevice.staff_id == staff.id,
+        StaffDevice.shop_id == shop.id,
+        StaffDevice.is_active == True
     ).first()
     
-    # Staff must be checked in (no checkout time) to access billing
-    if not attendance or not attendance.check_in_time or attendance.check_out_time:
+    if not staff_device or not staff_device.is_inside_geofence:
         raise HTTPException(
             status_code=403, 
-            detail="Access denied. You must be checked in at the shop to access billing."
+            detail="Access denied. You must be inside the shop to access billing."
         )
     
     return staff, shop.id

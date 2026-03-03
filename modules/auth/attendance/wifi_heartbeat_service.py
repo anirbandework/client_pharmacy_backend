@@ -95,13 +95,43 @@ class WiFiHeartbeatService:
                     staff_id=staff_id,
                     shop_id=shop_id,
                     mac_address=mac_address.upper(),
-                    device_name="Auto-registered"
+                    device_name="Auto-registered",
+                    is_inside_geofence=True,
+                    is_active=True,
+                    last_seen=datetime.now()
                 )
                 db.add(device)
                 db.flush()
+            else:
+                # Update existing device
+                device.last_seen = datetime.now()
+                device.is_inside_geofence = True
+                device.is_active = True
+        else:
+            # No MAC address - find or create device by staff_id
+            device = db.query(models.StaffDevice).filter(
+                models.StaffDevice.staff_id == staff_id,
+                models.StaffDevice.shop_id == shop_id,
+                models.StaffDevice.is_active == True
+            ).first()
             
-            # Update last_seen
-            device.last_seen = datetime.now()
+            if not device:
+                # Create device without MAC
+                device = models.StaffDevice(
+                    staff_id=staff_id,
+                    shop_id=shop_id,
+                    device_name="Unknown Device",
+                    is_inside_geofence=True,
+                    is_active=True,
+                    last_seen=datetime.now()
+                )
+                db.add(device)
+                db.flush()
+            else:
+                # Update existing device
+                device.last_seen = datetime.now()
+                device.is_inside_geofence = True
+                device.is_active = True
         
         # Check if already checked in today
         today = date.today()

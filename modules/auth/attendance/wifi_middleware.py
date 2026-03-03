@@ -43,8 +43,13 @@ class WiFiEnforcementMiddleware(BaseHTTPMiddleware):
         token = auth_header.split(" ")[1]
         token_data = AuthService.decode_token(token)
         
-        if not token_data or token_data.user_type != "staff":
-            return await call_next(request)  # Only enforce for staff
+        # Exempt admin and super_admin from WiFi checks
+        if not token_data or token_data.user_type in ["admin", "super_admin"]:
+            return await call_next(request)
+        
+        # Only enforce for staff
+        if token_data.user_type != "staff":
+            return await call_next(request)
         
         # Check WiFi requirement
         db = SessionLocal()
@@ -67,17 +72,14 @@ class WiFiEnforcementMiddleware(BaseHTTPMiddleware):
             if settings and not settings.require_wifi_for_modules:
                 return await call_next(request)
             
-            # Check if staff is currently connected to shop WiFi (has active attendance record today)
-            today = date.today()
-            active_attendance = db.query(AttendanceRecord).filter(
-                AttendanceRecord.staff_id == token_data.user_id,
-                AttendanceRecord.shop_id == shop.id,
-                AttendanceRecord.date == today,
-                AttendanceRecord.check_in_time.isnot(None),
-                AttendanceRecord.check_out_time.is_(None)  # Not checked out yet
+            # Check if staff device is currently connected to shop WiFi
+            staff_device = db.query(StaffDevice).filter(
+                StaffDevice.staff_id == token_data.user_id,
+                StaffDevice.shop_id == shop.id,
+                StaffDevice.is_active == True
             ).first()
             
-            if not active_attendance:
+            if not staff_device or not staff_device.is_inside_geofence:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="WiFi connection required. Please connect to shop WiFi to access this module."

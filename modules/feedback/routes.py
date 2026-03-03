@@ -7,6 +7,7 @@ from datetime import datetime
 from . import schemas, models
 from modules.auth.dependencies import get_current_user as get_user_dict, get_current_admin, get_current_staff, get_current_super_admin
 from modules.auth.models import Staff, Admin, SuperAdmin, Shop
+from app.utils.cache import dashboard_cache
 
 router = APIRouter()
 
@@ -84,6 +85,8 @@ def submit_admin_feedback(
 # GET USER'S OWN FEEDBACK
 @router.get("/my-feedback", response_model=List[schemas.FeedbackResponse])
 def get_my_feedback(
+    skip: int = 0,
+    limit: int = 20,
     db: Session = Depends(get_db),
     user_dict: dict = Depends(get_user_dict)
 ):
@@ -94,7 +97,7 @@ def get_my_feedback(
     return db.query(models.Feedback).filter(
         models.Feedback.user_type == user_type,
         models.Feedback.user_id == user_id
-    ).order_by(models.Feedback.created_at.desc()).all()
+    ).order_by(models.Feedback.created_at.desc()).offset(skip).limit(limit).all()
 
 # GET UNREAD RESPONSES COUNT
 @router.get("/my-feedback/unread-count")
@@ -106,6 +109,11 @@ def get_unread_responses_count(
     user_type = user_dict["token_data"].user_type
     user_id = user_dict["user"].id
     
+    cache_key = f"feedback_unread:{user_type}:{user_id}"
+    cached = dashboard_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    
     # Count feedback that has admin_response but status is not 'closed'
     unread = db.query(models.Feedback).filter(
         models.Feedback.user_type == user_type,
@@ -114,7 +122,9 @@ def get_unread_responses_count(
         models.Feedback.status != "closed"
     ).count()
     
-    return {"unread_responses": unread}
+    result = {"unread_responses": unread}
+    dashboard_cache.set(cache_key, result)
+    return result
 
 # MARK FEEDBACK AS READ
 @router.put("/my-feedback/{feedback_id}/mark-read")
@@ -150,7 +160,7 @@ def get_all_feedback(
     user_type: Optional[str] = None,
     organization_id: Optional[str] = None,
     skip: int = 0,
-    limit: int = 100,
+    limit: int = 50,
     super_admin: SuperAdmin = Depends(get_current_super_admin),
     db: Session = Depends(get_db)
 ):
@@ -202,6 +212,11 @@ def get_feedback_stats(
     db: Session = Depends(get_db)
 ):
     """Get feedback statistics"""
+    cache_key = "feedback_stats"
+    cached = dashboard_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    
     total = db.query(models.Feedback).count()
     pending = db.query(models.Feedback).filter(models.Feedback.status == "pending").count()
     resolved = db.query(models.Feedback).filter(models.Feedback.status == "resolved").count()
@@ -218,7 +233,7 @@ def get_feedback_stats(
         models.Feedback.satisfaction_rating.isnot(None)
     ).scalar() or 0
     
-    return {
+    result = {
         "total_feedback": total,
         "pending": pending,
         "resolved": resolved,
@@ -230,3 +245,5 @@ def get_feedback_stats(
             2
         )
     }
+    dashboard_cache.set(cache_key, result)
+    return result

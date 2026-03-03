@@ -13,6 +13,7 @@ from modules.auth.dependencies import get_current_admin
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from io import BytesIO
+from app.utils.cache import dashboard_cache
 
 router = APIRouter()
 
@@ -188,7 +189,7 @@ def get_stock_items(
     item_name: Optional[str] = None,
     batch_number: Optional[str] = None,
     skip: int = 0,
-    limit: int = 100,
+    limit: int = 50,
     db: Session = Depends(get_db),
     current_user: tuple = Depends(get_current_user)
 ):
@@ -287,7 +288,7 @@ def delete_stock_item(
 @router.get("/items/unassigned/list", response_model=List[schemas.StockItem])
 def get_unassigned_items(
     skip: int = 0,
-    limit: int = 100,
+    limit: int = 50,
     db: Session = Depends(get_db),
     current_user: tuple = Depends(get_current_user)
 ):
@@ -377,7 +378,7 @@ def get_purchases(
     end_date: Optional[date] = None,
     supplier_name: Optional[str] = None,
     skip: int = 0,
-    limit: int = 100,
+    limit: int = 50,
     db: Session = Depends(get_db),
     current_user: tuple = Depends(get_current_user)
 ):
@@ -466,7 +467,7 @@ def get_sales(
     end_date: Optional[date] = None,
     customer_phone: Optional[str] = None,
     skip: int = 0,
-    limit: int = 100,
+    limit: int = 50,
     db: Session = Depends(get_db),
     current_user: tuple = Depends(get_current_user)
 ):
@@ -724,7 +725,7 @@ def get_stock_adjustments(
     stock_item_id: Optional[int] = None,
     adjustment_type: Optional[str] = None,
     skip: int = 0,
-    limit: int = 100,
+    limit: int = 50,
     db: Session = Depends(get_db),
     current_user: tuple = Depends(get_current_user)
 ):
@@ -748,12 +749,19 @@ def get_admin_dashboard_analytics(
     admin = Depends(get_current_admin)
 ):
     """Get comprehensive stock audit analytics for admin dashboard"""
+    cache_key = f"stock_audit_dashboard:{admin.organization_id}:{shop_id or 'all'}"
+    cached = dashboard_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    
     try:
-        return StockAuditAnalytics.get_comprehensive_analytics(
+        result = StockAuditAnalytics.get_comprehensive_analytics(
             db=db,
             organization_id=admin.organization_id,
             shop_id=shop_id
         )
+        dashboard_cache.set(cache_key, result, ttl=60)
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -764,13 +772,20 @@ def get_admin_ai_insights(
     admin = Depends(get_current_admin)
 ):
     """Get AI-generated insights for admin (organization-wide or specific shop)"""
+    cache_key = f"stock_audit_ai:{admin.organization_id}:{shop_id or 'all'}"
+    cached = dashboard_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    
     try:
         ai_service = StockAuditAIAnalytics()
-        return ai_service.generate_comprehensive_analysis(
+        result = ai_service.generate_comprehensive_analysis(
             db=db,
             organization_id=admin.organization_id,
             shop_id=shop_id
         )
+        dashboard_cache.set(cache_key, result, ttl=3600)
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
