@@ -44,10 +44,21 @@ class PurchaseInvoice(Base):
     # Custom fields for shop-specific data
     custom_fields = Column(JSON, nullable=True, default={})
     
-    # Verification status
+    # Verification status - Two-level verification
+    is_staff_verified = Column(Boolean, default=False)
+    staff_verified_by = Column(Integer, ForeignKey("staff.id"), nullable=True)
+    staff_verified_at = Column(DateTime, nullable=True)
+    
+    is_admin_verified = Column(Boolean, default=False)
+    admin_verified_by = Column(Integer, ForeignKey("admins.id"), nullable=True)
+    admin_verified_at = Column(DateTime, nullable=True)
+    
+    # Admin rejection tracking
+    admin_rejected_by = Column(Integer, ForeignKey("admins.id"), nullable=True)
+    admin_rejected_at = Column(DateTime, nullable=True)
+    
+    # Legacy field for backward compatibility
     is_verified = Column(Boolean, default=False)
-    verified_by = Column(Integer, ForeignKey("staff.id"), nullable=True)
-    verified_at = Column(DateTime, nullable=True)
     
     # Timestamps
     created_at = Column(DateTime, default=datetime.now)

@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from app.database.database import get_db
 from .dependencies import get_current_user_with_geofence as get_current_user
+from modules.auth.dependencies import get_current_user as get_user_dict
 from modules.auth.models import Staff
 from typing import List, Optional
 from datetime import datetime, date
@@ -61,16 +62,70 @@ async def upload_invoice_pdf(
         if is_pdf:
             logger.info(f"🔍 Starting PDF extraction...")
             extractor = AIInvoiceExtractor()
+            
+            # First, extract text for validation
+            with open(file_path, "rb") as f:
+                import pdfplumber
+                text = ""
+                with pdfplumber.open(f) as pdf:
+                    for page in pdf.pages:
+                        text += page.extract_text() or ""
+            
+            # Validate format
+            validation = extractor.validate_document_format(text, "PDF")
+            
+            if not validation.get("is_valid", False):
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                error_details = {
+                    "error": "Invalid document format",
+                    "validation": validation
+                }
+                raise HTTPException(
+                    status_code=400,
+                    detail=error_details
+                )
+            
+            # Proceed with extraction
             parsed_data = extractor.extract_from_pdf(file_path)
             logger.info(f"✅ PDF extraction completed - Found {len(parsed_data.get('items', []))} items")
         else:  # Excel
             logger.info(f"📊 Starting Excel extraction...")
+            
+            # Read Excel and convert to text for validation
+            import pandas as pd
+            df = pd.read_excel(file_path, sheet_name=0)
+            excel_text = df.to_string()
+            
+            # Validate format using AI
+            extractor = AIInvoiceExtractor()
+            validation = extractor.validate_document_format(excel_text, "Excel")
+            
+            if not validation.get("is_valid", False):
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                error_details = {
+                    "error": "Invalid document format",
+                    "validation": validation
+                }
+                raise HTTPException(
+                    status_code=400,
+                    detail=error_details
+                )
+            
+            # Proceed with extraction
             parsed_data = ExcelInvoiceExtractor.extract_from_excel(file_path)
             logger.info(f"✅ Excel extraction completed - Found {len(parsed_data.get('items', []))} items")
+    except HTTPException:
+        # Re-raise HTTPException as-is (validation errors, etc.)
+        raise
     except Exception as e:
         logger.error(f"❌ Extraction failed: {str(e)}")
-        os.remove(file_path)
-        raise HTTPException(status_code=400, detail=f"Failed to parse file: {str(e)}")
+        logger.exception(e)  # Log full traceback
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        error_msg = str(e) if str(e) else "Unknown error during file processing"
+        raise HTTPException(status_code=400, detail=f"Failed to parse file: {error_msg}")
     
     # Check for duplicate invoice
     invoice_number = parsed_data.get("invoice_number", "UNKNOWN")
@@ -258,11 +313,24 @@ def get_invoices(
     # Add item count and verified_by_name
     result = []
     for inv in invoices:
-        verified_by_name = None
-        if inv.verified_by:
-            verifier = db.query(Staff).filter(Staff.id == inv.verified_by).first()
+        staff_verified_by_name = None
+        if inv.staff_verified_by:
+            verifier = db.query(Staff).filter(Staff.id == inv.staff_verified_by).first()
             if verifier:
-                verified_by_name = verifier.name
+                staff_verified_by_name = verifier.name
+        
+        from modules.auth.models import Admin
+        admin_verified_by_name = None
+        if inv.admin_verified_by:
+            admin_verifier = db.query(Admin).filter(Admin.id == inv.admin_verified_by).first()
+            if admin_verifier:
+                admin_verified_by_name = admin_verifier.full_name
+        
+        admin_rejected_by_name = None
+        if inv.admin_rejected_by:
+            admin_rejector = db.query(Admin).filter(Admin.id == inv.admin_rejected_by).first()
+            if admin_rejector:
+                admin_rejected_by_name = admin_rejector.full_name
         
         result.append({
             "id": inv.id,
@@ -271,8 +339,12 @@ def get_invoices(
             "supplier_name": inv.supplier_name,
             "net_amount": inv.net_amount,
             "total_items": len(inv.items),
-            "is_verified": inv.is_verified,
-            "verified_by_name": verified_by_name,
+            "is_staff_verified": inv.is_staff_verified,
+            "staff_verified_by_name": staff_verified_by_name,
+            "is_admin_verified": inv.is_admin_verified,
+            "admin_verified_by_name": admin_verified_by_name,
+            "admin_rejected_by_name": admin_rejected_by_name,
+            "admin_rejected_at": inv.admin_rejected_at,
             "staff_name": inv.staff_name,
             "created_at": inv.created_at
         })
@@ -322,9 +394,11 @@ def update_invoice(
     invoice.round_off = invoice_data.round_off
     invoice.net_amount = invoice_data.net_amount
     invoice.custom_fields = invoice_data.custom_fields or {}
-    invoice.is_verified = True
-    invoice.verified_by = staff.id
-    invoice.verified_at = datetime.now()
+    invoice.is_staff_verified = True
+    invoice.staff_verified_by = staff.id
+    invoice.staff_verified_at = datetime.now()
+    invoice.admin_rejected_by = None  # Clear rejection when re-verified
+    invoice.admin_rejected_at = None
     invoice.updated_at = datetime.now()
     
     # Delete existing items
@@ -380,14 +454,7 @@ def update_invoice(
     db.commit()
     db.refresh(invoice)
     
-    # Sync to stock audit system
-    try:
-        from modules.stock_audit.sync_service import InvoiceStockSyncService
-        sync_result = InvoiceStockSyncService.sync_invoice_to_stock(db, invoice_id, shop_id)
-        logger.info(f"✅ Synced invoice {invoice_id} to stock: {sync_result}")
-    except Exception as e:
-        logger.error(f"❌ Failed to sync invoice to stock: {e}")
-        # Don't fail the request if sync fails
+    # DO NOT sync to stock yet - wait for admin verification
     
     return invoice
 
@@ -395,25 +462,59 @@ def update_invoice(
 def get_invoice(
     invoice_id: int,
     db: Session = Depends(get_db),
-    current_user: tuple = Depends(get_current_user)
+    user_dict: dict = Depends(get_user_dict)
 ):
-    """Get specific invoice details"""
-    staff, shop_id = current_user
+    """Get specific invoice details - accessible by both staff and admin"""
+    from modules.auth.models import Admin, Shop
     
-    invoice = db.query(models.PurchaseInvoice).filter(
-        models.PurchaseInvoice.id == invoice_id,
-        models.PurchaseInvoice.shop_id == shop_id
-    ).first()
+    user_type = user_dict["token_data"].user_type
+    
+    # Query invoice based on user type
+    if user_type == "staff":
+        staff = user_dict["user"]
+        shop_code = user_dict["token_data"].shop_code
+        
+        if not shop_code:
+            raise HTTPException(status_code=400, detail="Shop code not found in token")
+        
+        shop = db.query(Shop).filter(
+            Shop.shop_code == shop_code,
+            Shop.organization_id == staff.shop.organization_id
+        ).first()
+        if not shop:
+            raise HTTPException(status_code=404, detail=f"Shop not found with code: {shop_code}")
+        
+        invoice = db.query(models.PurchaseInvoice).filter(
+            models.PurchaseInvoice.id == invoice_id,
+            models.PurchaseInvoice.shop_id == shop.id
+        ).first()
+    
+    elif user_type == "admin":
+        admin = user_dict["user"]
+        invoice = db.query(models.PurchaseInvoice).join(Shop).filter(
+            models.PurchaseInvoice.id == invoice_id,
+            Shop.organization_id == admin.organization_id
+        ).first()
+    
+    else:
+        raise HTTPException(status_code=403, detail="Staff or Admin access required")
     
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
     
-    # Get verified_by_name
-    verified_by_name = None
-    if invoice.verified_by:
-        verifier = db.query(Staff).filter(Staff.id == invoice.verified_by).first()
+    # Get verified_by_name (staff who verified)
+    staff_verified_by_name = None
+    if invoice.staff_verified_by:
+        verifier = db.query(Staff).filter(Staff.id == invoice.staff_verified_by).first()
         if verifier:
-            verified_by_name = verifier.name
+            staff_verified_by_name = verifier.name
+    
+    # Get admin_verified_by_name
+    admin_verified_by_name = None
+    if invoice.admin_verified_by:
+        admin_verifier = db.query(Admin).filter(Admin.id == invoice.admin_verified_by).first()
+        if admin_verifier:
+            admin_verified_by_name = admin_verifier.full_name
     
     # Convert to dict and add verified_by_name
     invoice_dict = {
@@ -440,9 +541,12 @@ def get_invoice(
         "net_amount": invoice.net_amount,
         "pdf_filename": invoice.pdf_filename,
         "custom_fields": invoice.custom_fields or {},
-        "is_verified": invoice.is_verified,
-        "verified_by_name": verified_by_name,
-        "verified_at": invoice.verified_at,
+        "is_staff_verified": invoice.is_staff_verified,
+        "staff_verified_by_name": staff_verified_by_name,
+        "staff_verified_at": invoice.staff_verified_at,
+        "is_admin_verified": invoice.is_admin_verified,
+        "admin_verified_by_name": admin_verified_by_name,
+        "admin_verified_at": invoice.admin_verified_at,
         "created_at": invoice.created_at,
         "items": invoice.items
     }
@@ -470,7 +574,7 @@ def delete_invoice(
     stock_reversed = False
     items_in_use = []
     
-    if invoice.is_verified:
+    if invoice.is_admin_verified:
         try:
             from modules.stock_audit.models import StockItem
             from modules.billing.models import BillItem

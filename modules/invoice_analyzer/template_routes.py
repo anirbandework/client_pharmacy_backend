@@ -20,25 +20,26 @@ def download_excel_template(current_user: tuple = Depends(get_current_user)):
         "Supplier_GSTIN": ["29ABCDE1234F1Z5", ""],
         "Supplier_Phone": ["9876543210", ""],
         "Composition": ["Paracetamol 500mg", "Amoxicillin 250mg"],
-        "Brand Name": ["Dolo 650", "Amoxil"],
+        "Product_Name": ["Dolo 650", "Amoxil"],
         "Manufacturer": ["CIPLA", "SUN"],
         "HSN_Code": ["30049099", "30042064"],
+        "Batch_Number": ["BATCH001", "BATCH002"],
         "Package": ["10 X 10", "10 X 6"],
         "Unit": ["Box", "Strip"],
         "Quantity": [10, 5],
-        "Manufacturing date": ["01/2024", "02/2024"],
+        "Manufacturing_Date": ["01/2024", "02/2024"],
         "Expiry_Date": ["12/2025", "06/2026"],
         "MRP": ["5.00/STRIP", "120.00/STRIP"],
-        "selling price": [4.0, 100.0],
-        "Profit margin": [20, 25],
-        "Discount on purchase%": [10, 15],
-        "Discount on sales%": [5, 8],
-        "Taxable amount": [2000, 1500],
+        "Unit_Price": [4.0, 100.0],
+        "Profit_Margin": [20, 25],
+        "Discount_On_Purchase": [10, 15],
+        "Discount_On_Sales": [5, 8],
+        "Taxable_Amount": [2000, 1500],
         "CGST_Percent": [2.5, 6.0],
-        "CGST Amount": [50, 90],
+        "CGST_Amount": [50, 90],
         "SGST_Percent": [2.5, 6.0],
-        "SGST Amount": [50, 90],
-        "Taxed amount": [2100, 1680],
+        "SGST_Amount": [50, 90],
+        "Total_Amount": [2100, 1680],
     }
     
     # Create DataFrame
@@ -53,14 +54,14 @@ def download_excel_template(current_user: tuple = Depends(get_current_user)):
         instructions = pd.DataFrame({
             "Column Name": [
                 "Invoice_Number", "Invoice_Date", "Supplier_Name", "Supplier_GSTIN",
-                "Composition", "Brand Name", "Manufacturer", "HSN_Code",
-                "Package", "Unit", "Quantity", "Manufacturing date", "Expiry_Date",
-                "MRP", "selling price", "Profit margin", "Discount on purchase%",
-                "Taxable amount", "CGST_Percent", "CGST Amount", "SGST_Percent", "SGST Amount"
+                "Composition", "Product_Name", "Manufacturer", "HSN_Code", "Batch_Number",
+                "Package", "Unit", "Quantity", "Manufacturing_Date", "Expiry_Date",
+                "MRP", "Unit_Price", "Profit_Margin", "Discount_On_Purchase",
+                "Taxable_Amount", "CGST_Percent", "CGST_Amount", "SGST_Percent", "SGST_Amount"
             ],
             "Required": [
                 "Yes", "Yes", "Yes", "No",
-                "No", "Yes", "No", "No",
+                "No", "Yes", "No", "No", "Yes",
                 "No", "No", "Yes", "No", "No",
                 "No", "No", "No", "No",
                 "No", "No", "No", "No", "No"
@@ -74,13 +75,14 @@ def download_excel_template(current_user: tuple = Depends(get_current_user)):
                 "Brand/Product name (required for each item)",
                 "Manufacturer code (e.g., CIPLA, SUN)",
                 "8-digit HSN code",
+                "Batch number (required for each item)",
                 "Package info (e.g., 10 X 10)",
                 "Unit type (Box, Strip, Bottle, etc.)",
                 "Quantity purchased (required)",
                 "Manufacturing date (MM/YYYY or DD/MM/YYYY)",
                 "Expiry date (MM/YYYY or DD/MM/YYYY)",
                 "MRP with unit (e.g., 5.00/STRIP)",
-                "Selling price per unit",
+                "Unit price per item",
                 "Profit margin percentage",
                 "Purchase discount percentage",
                 "Taxable amount (auto-calculated if empty)",
@@ -96,21 +98,21 @@ def download_excel_template(current_user: tuple = Depends(get_current_user)):
         field_reference = pd.DataFrame({
             "Category": [
                 "Invoice Header", "Invoice Header", "Invoice Header", "Invoice Header",
-                "Product Info", "Product Info", "Product Info", "Product Info",
+                "Product Info", "Product Info", "Product Info", "Product Info", "Product Info",
                 "Packaging", "Packaging", "Quantity", "Dates", "Dates",
                 "Pricing", "Pricing", "Pricing", "Discounts",
                 "Tax", "Tax", "Tax", "Tax", "Tax"
             ],
             "Field": [
                 "Invoice_Number", "Invoice_Date", "Supplier_Name", "Supplier_GSTIN",
-                "Composition", "Brand Name", "Manufacturer", "HSN_Code",
-                "Package", "Unit", "Quantity", "Manufacturing date", "Expiry_Date",
-                "MRP", "selling price", "Profit margin", "Discount on purchase%",
-                "Taxable amount", "CGST_Percent", "CGST Amount", "SGST_Percent", "SGST Amount"
+                "Composition", "Product_Name", "Manufacturer", "HSN_Code", "Batch_Number",
+                "Package", "Unit", "Quantity", "Manufacturing_Date", "Expiry_Date",
+                "MRP", "Unit_Price", "Profit_Margin", "Discount_On_Purchase",
+                "Taxable_Amount", "CGST_Percent", "CGST_Amount", "SGST_Percent", "SGST_Amount"
             ],
             "Example": [
                 "INV-001", "15/01/2024", "ABC Pharmaceuticals", "29ABCDE1234F1Z5",
-                "Paracetamol 500mg", "Dolo 650", "CIPLA", "30049099",
+                "Paracetamol 500mg", "Dolo 650", "CIPLA", "30049099", "BATCH001",
                 "10 X 10", "Box", "10", "01/2024", "12/2025",
                 "5.00/STRIP", "4.0", "20", "10",
                 "2000", "2.5", "50", "2.5", "50"

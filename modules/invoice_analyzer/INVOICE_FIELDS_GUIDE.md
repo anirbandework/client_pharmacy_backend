@@ -26,6 +26,97 @@ The system prevents duplicate invoice uploads using two checks:
 
 ---
 
+## AI-Powered Format Validation
+
+Before extracting data, the system uses Gemini AI to validate your document format and provide detailed feedback.
+
+**Validation Process:**
+1. Upload PDF or Excel file
+2. AI analyzes document structure
+3. Checks for required fields
+4. Provides detailed feedback if format is invalid
+5. Proceeds with extraction only if format is valid
+
+**What AI Checks:**
+- Invoice Number present
+- Invoice Date present
+- Supplier Name present
+- Items table with Product Names
+- Batch Numbers for each item
+- Quantities for each item
+- Prices (Unit Price, Taxable Amount)
+- GST details (CGST%, CGST Amount, SGST%, SGST Amount)
+- Total amounts
+
+**Error Response Format:**
+```json
+{
+  "error": "Invalid document format",
+  "validation": {
+    "is_valid": false,
+    "missing_fields": [
+      "Invoice Number",
+      "Product Names in items table"
+    ],
+    "format_issues": [
+      "Items table not clearly structured",
+      "GST columns missing or unclear"
+    ],
+    "suggestions": [
+      "Add 'Invoice No:' field at the top of the document",
+      "Ensure items table has clear columns: Product Name, Batch, Qty, Price, CGST%, CGST Amt, SGST%, SGST Amt",
+      "Make sure product names are not split across multiple lines",
+      "Ensure batch numbers are clearly visible for each item"
+    ],
+    "detected_fields": {
+      "invoice_number": null,
+      "invoice_date": "31/07/2025",
+      "supplier_name": "ABC Pharmaceuticals",
+      "items_count": 0,
+      "has_product_names": false,
+      "has_batch_numbers": false,
+      "has_quantities": true,
+      "has_prices": true,
+      "has_gst_details": false
+    }
+  }
+}
+```
+
+**How to Fix Format Issues:**
+
+1. **Missing Invoice Number:**
+   - Add "Invoice No: XXXXX" at the top of the document
+   - Make sure it's clearly labeled
+
+2. **Missing Product Names:**
+   - Ensure items table has a "Product Name" column
+   - Product names should be in a single line, not split
+   - Use clear, readable font
+
+3. **Missing Batch Numbers:**
+   - Add "Batch" or "Batch No" column in items table
+   - Each item must have a batch number
+
+4. **Missing GST Details:**
+   - Add columns: CGST%, CGST Amt, SGST%, SGST Amt
+   - Or: IGST%, IGST Amt (for inter-state)
+   - Values must be clearly visible
+
+5. **Unclear Table Structure:**
+   - Use clear table borders
+   - Align columns properly
+   - Use consistent spacing
+   - Avoid merged cells in data rows
+
+**Benefits:**
+- Saves time by catching format issues before extraction
+- Provides actionable feedback to fix documents
+- Reduces failed uploads and data entry errors
+- Helps standardize invoice formats from suppliers
+
+---
+
 ## Compulsory Fields
 
 These fields MUST be present for successful invoice processing:

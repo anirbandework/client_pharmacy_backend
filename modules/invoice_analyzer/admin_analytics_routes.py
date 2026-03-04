@@ -61,14 +61,14 @@ def get_expiry_alerts(
     from modules.auth.models import Shop
     from datetime import date, timedelta
     
-    # Query items - ONLY FROM VERIFIED INVOICES
+    # Query items - ONLY FROM ADMIN-VERIFIED INVOICES
     query = db.query(PurchaseInvoiceItem).join(
         PurchaseInvoice
     ).join(
         Shop
     ).filter(
         Shop.organization_id == admin.organization_id,
-        PurchaseInvoice.is_verified == True,
+        PurchaseInvoice.is_admin_verified == True,
         PurchaseInvoiceItem.expiry_date.isnot(None)
     )
     
@@ -142,7 +142,7 @@ def get_supplier_performance(
     
     query = db.query(PurchaseInvoice).join(Shop).filter(
         Shop.organization_id == admin.organization_id,
-        PurchaseInvoice.is_verified == True
+        PurchaseInvoice.is_admin_verified == True
     )
     
     if shop_id:
@@ -296,7 +296,7 @@ def get_pending_verification(
     
     query = db.query(PurchaseInvoice).join(Shop).filter(
         Shop.organization_id == admin.organization_id,
-        PurchaseInvoice.is_verified == False
+        PurchaseInvoice.is_staff_verified == False
     )
     
     if shop_id:

@@ -19,10 +19,10 @@ class DashboardAnalytics:
         from .models import PurchaseInvoice, PurchaseInvoiceItem
         from modules.auth.models import Shop
         
-        # Base query - ONLY VERIFIED INVOICES
+        # Base query - ONLY ADMIN-VERIFIED INVOICES
         query = db.query(PurchaseInvoice).join(Shop).filter(
             Shop.organization_id == organization_id,
-            PurchaseInvoice.is_verified == True
+            PurchaseInvoice.is_admin_verified == True
         )
         
         if shop_id:

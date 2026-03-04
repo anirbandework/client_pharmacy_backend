@@ -11,7 +11,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     USER_TYPE_LIMITS = {
         "super_admin": 500,
         "admin": 300,
-        "staff": 100,
+        "staff": 200,  # Increased from 100
         "anonymous": 20
     }
     

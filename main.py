@@ -15,7 +15,10 @@ from modules.customer_tracking.routes import router as customer_router
 from modules.invoice_analyzer.routes import router as invoice_router
 from modules.invoice_analyzer.template_routes import router as invoice_template_router
 from modules.invoice_analyzer.admin_analytics_routes import router as invoice_admin_analytics_router
+from modules.invoice_analyzer.admin_routes import router as invoice_admin_router
 from modules.invoice_analyzer.public_routes import router as invoice_public_router
+from modules.invoice_analyzer.autocomplete_routes import router as invoice_autocomplete_router
+from modules.invoice_analyzer.analytics_routes import router as invoice_analytics_router
 from modules.stock_audit.routes import router as stock_router
 from modules.profit_analysis.routes import router as profit_router
 from modules.auth.routes import router as auth_router
@@ -166,6 +169,9 @@ app.include_router(customer_router, prefix="/api/customer-tracking", tags=["Cust
 app.include_router(invoice_public_router, prefix="/api/purchase-invoices", tags=["Purchase Invoice - Public"])
 app.include_router(invoice_template_router, prefix="/api/purchase-invoices", tags=["Purchase Invoice Analyzer"])
 app.include_router(invoice_admin_analytics_router, prefix="/api/purchase-invoices", tags=["Purchase Invoice Analytics - Admin"])
+app.include_router(invoice_admin_router, prefix="/api/purchase-invoices", tags=["Purchase Invoice - Admin Verification"])
+app.include_router(invoice_autocomplete_router, prefix="/api/purchase-invoices", tags=["Purchase Invoice Autocomplete"])
+app.include_router(invoice_analytics_router, prefix="/api/purchase-invoices", tags=["Purchase Invoice Analytics"])
 app.include_router(invoice_router, prefix="/api/purchase-invoices", tags=["Purchase Invoice Analyzer"])
 app.include_router(stock_router, prefix="/api/stock-audit", tags=["Stock Audit"])
 app.include_router(billing_router, prefix="/api/billing", tags=["Billing System"])

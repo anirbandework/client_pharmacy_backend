@@ -1,5 +1,5 @@
-from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
+from pydantic import BaseModel, field_validator
+from typing import List, Optional, Dict, Any, Union
 from datetime import date, datetime
 
 class PurchaseInvoiceItemUpdate(BaseModel):
@@ -13,8 +13,8 @@ class PurchaseInvoiceItemUpdate(BaseModel):
     free_quantity: float = 0.0
     package: Optional[str] = None
     unit: Optional[str] = None
-    manufacturing_date: Optional[date] = None
-    expiry_date: Optional[date] = None
+    manufacturing_date: Union[date, str, None] = None
+    expiry_date: Union[date, str, None] = None
     mrp: Optional[str] = None
     unit_price: float
     selling_price: float = 0.0
@@ -33,6 +33,13 @@ class PurchaseInvoiceItemUpdate(BaseModel):
     igst_amount: float = 0.0
     total_amount: float
     custom_fields: Optional[Dict[str, Any]] = {}
+    
+    @field_validator('manufacturing_date', 'expiry_date', mode='before')
+    @classmethod
+    def validate_dates(cls, v):
+        if v == '' or v is None:
+            return None
+        return v
 
 class PurchaseInvoiceUpdate(BaseModel):
     invoice_number: str
@@ -51,6 +58,13 @@ class PurchaseInvoiceUpdate(BaseModel):
     net_amount: float
     custom_fields: Optional[Dict[str, Any]] = {}
     items: List[PurchaseInvoiceItemUpdate]
+    
+    @field_validator('due_date', mode='before')
+    @classmethod
+    def validate_due_date(cls, v):
+        if v == '' or v is None:
+            return None
+        return v
 
 class PurchaseInvoiceItemResponse(BaseModel):
     id: int
@@ -111,9 +125,12 @@ class PurchaseInvoiceResponse(BaseModel):
     net_amount: float
     pdf_filename: Optional[str]
     custom_fields: Optional[Dict[str, Any]] = {}
-    is_verified: bool = False
-    verified_by_name: Optional[str] = None
-    verified_at: Optional[datetime] = None
+    is_staff_verified: bool = False
+    staff_verified_by_name: Optional[str] = None
+    staff_verified_at: Optional[datetime] = None
+    is_admin_verified: bool = False
+    admin_verified_by_name: Optional[str] = None
+    admin_verified_at: Optional[datetime] = None
     created_at: datetime
     items: List[PurchaseInvoiceItemResponse]
     
@@ -127,8 +144,10 @@ class PurchaseInvoiceListResponse(BaseModel):
     supplier_name: str
     net_amount: float
     total_items: int
-    is_verified: bool = False
-    verified_by_name: Optional[str] = None
+    is_staff_verified: bool = False
+    staff_verified_by_name: Optional[str] = None
+    is_admin_verified: bool = False
+    admin_verified_by_name: Optional[str] = None
     staff_name: str
     created_at: datetime
     

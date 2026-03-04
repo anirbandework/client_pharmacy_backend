@@ -7,11 +7,11 @@ import logging
 logger = logging.getLogger(__name__)
 
 try:
-    import google.generativeai as genai
+    from google import genai
     GENAI_AVAILABLE = True
 except ImportError:
     GENAI_AVAILABLE = False
-    logger.warning("google-generativeai not installed. Using fallback extraction.")
+    logger.warning("google-genai not installed. Using fallback extraction.")
 
 class AIInvoiceExtractor:
     """AI-powered invoice extraction that works with any PDF format"""
@@ -20,19 +20,94 @@ class AIInvoiceExtractor:
         self.api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
         if self.api_key and GENAI_AVAILABLE:
             try:
-                genai.configure(api_key=self.api_key)
-                # Use Gemini 2.5 Flash (fastest and most cost-effective)
-                self.model = genai.GenerativeModel('models/gemini-2.5-flash')
-                logger.info("✅ Gemini AI configured successfully with gemini-2.5-flash - AI extraction enabled")
+                self.client = genai.Client(api_key=self.api_key)
+                logger.info("✅ Gemini AI configured successfully - AI extraction enabled")
             except Exception as e:
                 logger.error(f"❌ Failed to configure Gemini AI: {e}")
-                self.model = None
+                self.client = None
         else:
-            self.model = None
+            self.client = None
             if not self.api_key:
                 logger.warning("⚠️ No Gemini API key found - using fallback extraction")
             if not GENAI_AVAILABLE:
-                logger.warning("⚠️ google-generativeai not installed - using fallback extraction")
+                logger.warning("⚠️ google-genai not installed - using fallback extraction")
+    
+    def validate_document_format(self, text: str, file_type: str = "PDF") -> Dict[str, Any]:
+        """Use AI to validate document format and provide detailed feedback"""
+        
+        if not self.client:
+            return {
+                "is_valid": False,
+                "error": "AI validation not available. Please ensure document has: Invoice Number, Date, Supplier Name, Items with Product Name, Batch, Quantity, Price, GST details."
+            }
+        
+        logger.info(f"🔍 Validating {file_type} format with AI...")
+        
+        # For Excel files, be more lenient with NaN values in header fields
+        excel_note = ""
+        if file_type == "Excel":
+            excel_note = """
+IMPORTANT for Excel files:
+- Invoice header fields (Invoice_Number, Invoice_Date, Supplier_Name) appear ONLY in the first row
+- Subsequent item rows will have NaN/empty values for these fields - this is NORMAL and VALID
+- Do NOT flag NaN values in header fields for rows after the first row as an error
+- Focus validation on: presence of header fields in first row, and item-level fields in all rows
+"""
+        
+        prompt = f"""
+Analyze this invoice document and check if it has the required format for data extraction.
+{excel_note}
+
+Required fields:
+1. Invoice Header (first row only): Invoice Number, Invoice Date, Supplier Name
+2. Item Details (per product row): Product Name, Batch Number, Quantity, Unit Price, GST details
+
+Return ONLY valid JSON (no markdown):
+{{
+  "is_valid": true/false,
+  "missing_fields": ["list of missing required fields"],
+  "format_issues": ["list of format problems"],
+  "suggestions": ["detailed suggestions to fix the document"],
+  "detected_fields": {{
+    "invoice_number": "found value or null",
+    "invoice_date": "found value or null",
+    "supplier_name": "found value or null",
+    "items_count": number of items found,
+    "has_product_names": true/false,
+    "has_batch_numbers": true/false,
+    "has_quantities": true/false,
+    "has_prices": true/false,
+    "has_gst_details": true/false
+  }}
+}}
+
+Document:
+{text[:3000]}
+"""
+        
+        try:
+            response = self.client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=prompt
+            )
+            result_text = response.text.strip()
+            
+            if result_text.startswith('```'):
+                lines = result_text.split('\n')
+                result_text = '\n'.join(lines[1:-1]) if len(lines) > 2 else result_text
+                if result_text.startswith('json'):
+                    result_text = result_text[4:].strip()
+            
+            validation = json.loads(result_text)
+            logger.info(f"✅ Format validation complete: {validation.get('is_valid')}")
+            return validation
+            
+        except Exception as e:
+            logger.error(f"❌ Format validation failed: {e}")
+            return {
+                "is_valid": False,
+                "error": f"Validation error: {str(e)}"
+            }
     
     def extract_from_pdf(self, pdf_path: str) -> Dict[str, Any]:
         """Extract invoice data using AI"""
@@ -44,7 +119,7 @@ class AIInvoiceExtractor:
             raise ValueError("No text extracted from PDF")
         
         # Use AI to extract structured data
-        if self.model:
+        if self.client:
             return self._ai_extract(text)
         else:
             return self._fallback_extract(text)
@@ -146,7 +221,10 @@ Invoice:
 """
         
         try:
-            response = self.model.generate_content(prompt)
+            response = self.client.models.generate_content(
+                model='gemini-1.5-flash',
+                contents=prompt
+            )
             result_text = response.text.strip()
             
             if result_text.startswith('```'):
