@@ -45,15 +45,20 @@ class InvoiceStockSyncService:
                 # Create new stock item
                 stock_item = StockItem(
                     shop_id=shop_id,
+                    composition=invoice_item.composition,
                     manufacturer=invoice_item.manufacturer,
                     hsn_code=invoice_item.hsn_code,
                     product_name=invoice_item.product_name,
                     batch_number=invoice_item.batch_number,
                     package=invoice_item.package,
+                    unit=invoice_item.unit,
+                    manufacturing_date=invoice_item.manufacturing_date,
                     expiry_date=invoice_item.expiry_date,
                     mrp=invoice_item.mrp,
                     quantity_software=int(invoice_item.quantity),
                     unit_price=invoice_item.unit_price,
+                    selling_price=invoice_item.selling_price,
+                    profit_margin=invoice_item.profit_margin,
                     source_invoice_id=invoice_id,
                     section_id=None  # Staff will assign later
                 )

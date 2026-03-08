@@ -37,11 +37,16 @@ class StockItemBase(BaseModel):
     manufacturer: Optional[str] = None
     hsn_code: Optional[str] = None
     product_name: str
+    composition: Optional[str] = None
     batch_number: str
     package: Optional[str] = None
+    unit: Optional[str] = None
     expiry_date: Optional[date] = None
+    manufacturing_date: Optional[date] = None
     mrp: Optional[str] = None
     unit_price: Optional[float] = None
+    selling_price: Optional[float] = None
+    profit_margin: Optional[float] = None
 
 class StockItemCreate(StockItemBase):
     section_id: Optional[int] = None
@@ -55,6 +60,7 @@ class StockItem(StockItemBase):
     last_audit_date: Optional[datetime] = None
     audit_discrepancy: int = 0
     created_at: datetime
+    updated_at: Optional[datetime] = None
     section_name: Optional[str] = None
     rack_name: Optional[str] = None
     total_value: Optional[float] = None

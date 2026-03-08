@@ -34,11 +34,14 @@ class StockItem(Base):
     section_id = Column(Integer, ForeignKey("stock_sections_audit.id"), nullable=True)
     
     # Invoice fields
+    composition = Column(String, nullable=True, index=True)
     manufacturer = Column(String, nullable=True)
     hsn_code = Column(String, nullable=True, index=True)
     product_name = Column(String, nullable=False, index=True)
     batch_number = Column(String, nullable=False, index=True)
     package = Column(String, nullable=True)
+    unit = Column(String, nullable=True)
+    manufacturing_date = Column(Date, nullable=True)
     expiry_date = Column(Date, nullable=True)
     
     # Stock quantities
@@ -48,6 +51,8 @@ class StockItem(Base):
     # Pricing from invoice
     mrp = Column(String, nullable=True)
     unit_price = Column(Float, nullable=True)
+    selling_price = Column(Float, nullable=True)
+    profit_margin = Column(Float, nullable=True)
     
     # Audit tracking
     last_audit_date = Column(DateTime, nullable=True)

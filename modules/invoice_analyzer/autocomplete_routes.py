@@ -91,7 +91,8 @@ def get_product_names(
         query = db.query(distinct(models.PurchaseInvoiceItem.product_name)).filter(
             models.PurchaseInvoiceItem.shop_id == shop_id,
             models.PurchaseInvoiceItem.product_name.isnot(None),
-            models.PurchaseInvoiceItem.product_name != ''
+            models.PurchaseInvoiceItem.product_name != '',
+            models.PurchaseInvoiceItem.product_name != 'Unknown Product'
         )
     
     elif user_type == "admin":
@@ -101,7 +102,8 @@ def get_product_names(
         ).join(Shop).filter(
             Shop.organization_id == admin.organization_id,
             models.PurchaseInvoiceItem.product_name.isnot(None),
-            models.PurchaseInvoiceItem.product_name != ''
+            models.PurchaseInvoiceItem.product_name != '',
+            models.PurchaseInvoiceItem.product_name != 'Unknown Product'
         )
     
     else:

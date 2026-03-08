@@ -59,12 +59,13 @@ Analyze this invoice document and check if it has the required format for data e
 {excel_note}
 
 Required fields:
-1. Invoice Header (first row only): Invoice Number, Invoice Date, Supplier Name
+1. Invoice Header: Invoice Number, Invoice Date, At least ONE supplier field (name, address, GSTIN, DL numbers, or phone)
 2. Item Details (per product row): Product Name, Batch Number, Quantity, Unit Price, GST details
 
 Return ONLY valid JSON (no markdown):
 {{
   "is_valid": true/false,
+  "can_extract_anyway": true/false (true if basic fields present but has format issues),
   "missing_fields": ["list of missing required fields"],
   "format_issues": ["list of format problems"],
   "suggestions": ["detailed suggestions to fix the document"],
@@ -72,6 +73,11 @@ Return ONLY valid JSON (no markdown):
     "invoice_number": "found value or null",
     "invoice_date": "found value or null",
     "supplier_name": "found value or null",
+    "supplier_address": "found value or null",
+    "supplier_gstin": "found value or null",
+    "supplier_dl_numbers": "found value or null",
+    "supplier_phone": "found value or null",
+    "has_any_supplier_field": true/false,
     "items_count": number of items found,
     "has_product_names": true/false,
     "has_batch_numbers": true/false,
@@ -80,6 +86,12 @@ Return ONLY valid JSON (no markdown):
     "has_gst_details": true/false
   }}
 }}
+
+Rules:
+- Set is_valid=true only if document is perfectly formatted
+- Set can_extract_anyway=true if invoice_number, invoice_date, at least one supplier field, and items are present (even with format issues)
+- Set can_extract_anyway=false if critical fields are missing
+- Set has_any_supplier_field=true if ANY of: supplier_name, supplier_address, supplier_gstin, supplier_dl_numbers, or supplier_phone is present
 
 Document:
 {text[:3000]}
@@ -99,13 +111,14 @@ Document:
                     result_text = result_text[4:].strip()
             
             validation = json.loads(result_text)
-            logger.info(f"✅ Format validation complete: {validation.get('is_valid')}")
+            logger.info(f"✅ Format validation complete: is_valid={validation.get('is_valid')}, can_extract_anyway={validation.get('can_extract_anyway')}")
             return validation
             
         except Exception as e:
             logger.error(f"❌ Format validation failed: {e}")
             return {
                 "is_valid": False,
+                "can_extract_anyway": False,
                 "error": f"Validation error: {str(e)}"
             }
     

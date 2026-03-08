@@ -25,13 +25,14 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 @router.post("/upload", response_model=schemas.PurchaseInvoiceResponse)
 async def upload_invoice_pdf(
     file: UploadFile = File(...),
+    force_extract: bool = Query(False),
     db: Session = Depends(get_db),
     current_user: tuple = Depends(get_current_user)
 ):
     """Upload and process purchase invoice PDF or Excel"""
     import logging
     logger = logging.getLogger(__name__)
-    logger.info(f"📤 Upload request received - File: {file.filename}, Size: {file.size if hasattr(file, 'size') else 'unknown'}")
+    logger.info(f"📤 Upload request received - File: {file.filename}, Size: {file.size if hasattr(file, 'size') else 'unknown'}, Force: {force_extract}")
     
     staff, shop_id = current_user
     
@@ -74,7 +75,7 @@ async def upload_invoice_pdf(
             # Validate format
             validation = extractor.validate_document_format(text, "PDF")
             
-            if not validation.get("is_valid", False):
+            if not validation.get("is_valid", False) and not force_extract:
                 if os.path.exists(file_path):
                     os.remove(file_path)
                 error_details = {
@@ -85,6 +86,10 @@ async def upload_invoice_pdf(
                     status_code=400,
                     detail=error_details
                 )
+            
+            # Log if proceeding with format issues
+            if force_extract and not validation.get("is_valid", False):
+                logger.warning(f"⚠️ Proceeding with extraction despite format issues (force_extract=True)")
             
             # Proceed with extraction
             parsed_data = extractor.extract_from_pdf(file_path)
@@ -101,7 +106,7 @@ async def upload_invoice_pdf(
             extractor = AIInvoiceExtractor()
             validation = extractor.validate_document_format(excel_text, "Excel")
             
-            if not validation.get("is_valid", False):
+            if not validation.get("is_valid", False) and not force_extract:
                 if os.path.exists(file_path):
                     os.remove(file_path)
                 error_details = {
@@ -112,6 +117,10 @@ async def upload_invoice_pdf(
                     status_code=400,
                     detail=error_details
                 )
+            
+            # Log if proceeding with format issues
+            if force_extract and not validation.get("is_valid", False):
+                logger.warning(f"⚠️ Proceeding with extraction despite format issues (force_extract=True)")
             
             # Proceed with extraction
             parsed_data = ExcelInvoiceExtractor.extract_from_excel(file_path)
@@ -641,6 +650,83 @@ def delete_invoice(
         response["warning"] = f"{len(items_in_use)} items are used in bills and were not deleted from stock"
     
     return response
+
+@router.post("/create", response_model=schemas.PurchaseInvoiceResponse)
+def create_invoice_manually(
+    invoice_data: schemas.PurchaseInvoiceUpdate,
+    db: Session = Depends(get_db),
+    current_user: tuple = Depends(get_current_user)
+):
+    """Create invoice manually without file upload"""
+    staff, shop_id = current_user
+    
+    invoice = models.PurchaseInvoice(
+        shop_id=shop_id,
+        staff_id=staff.id,
+        staff_name=staff.name,
+        invoice_number=invoice_data.invoice_number,
+        invoice_date=invoice_data.invoice_date,
+        due_date=invoice_data.due_date,
+        supplier_name=invoice_data.supplier_name,
+        supplier_address=invoice_data.supplier_address,
+        supplier_gstin=invoice_data.supplier_gstin,
+        supplier_dl_numbers=invoice_data.supplier_dl_numbers,
+        supplier_phone=invoice_data.supplier_phone,
+        gross_amount=invoice_data.gross_amount,
+        discount_amount=invoice_data.discount_amount,
+        taxable_amount=invoice_data.taxable_amount,
+        total_gst=invoice_data.total_gst,
+        round_off=invoice_data.round_off,
+        net_amount=invoice_data.net_amount,
+        custom_fields=invoice_data.custom_fields or {},
+        is_staff_verified=True,
+        staff_verified_by=staff.id,
+        staff_verified_at=datetime.now()
+    )
+    
+    db.add(invoice)
+    db.flush()
+    
+    for item_data in invoice_data.items:
+        item = models.PurchaseInvoiceItem(
+            invoice_id=invoice.id,
+            shop_id=shop_id,
+            composition=item_data.composition,
+            manufacturer=item_data.manufacturer,
+            hsn_code=item_data.hsn_code,
+            product_name=item_data.product_name or "Unknown Product",
+            batch_number=item_data.batch_number,
+            quantity=item_data.quantity,
+            free_quantity=item_data.free_quantity,
+            package=item_data.package,
+            unit=item_data.unit,
+            manufacturing_date=item_data.manufacturing_date if isinstance(item_data.manufacturing_date, date) else None,
+            expiry_date=item_data.expiry_date if isinstance(item_data.expiry_date, date) else None,
+            mrp=item_data.mrp,
+            unit_price=item_data.unit_price,
+            selling_price=item_data.selling_price,
+            profit_margin=item_data.profit_margin,
+            discount_on_purchase=item_data.discount_on_purchase,
+            discount_on_sales=item_data.discount_on_sales,
+            discount_percent=item_data.discount_percent,
+            discount_amount=item_data.discount_amount,
+            before_discount=item_data.before_discount,
+            taxable_amount=item_data.taxable_amount,
+            cgst_percent=item_data.cgst_percent,
+            cgst_amount=item_data.cgst_amount,
+            sgst_percent=item_data.sgst_percent,
+            sgst_amount=item_data.sgst_amount,
+            igst_percent=item_data.igst_percent,
+            igst_amount=item_data.igst_amount,
+            total_amount=item_data.total_amount,
+            custom_fields=item_data.custom_fields or {}
+        )
+        db.add(item)
+    
+    db.commit()
+    db.refresh(invoice)
+    
+    return invoice
 
 @router.get("/stats/summary")
 def get_invoice_summary(

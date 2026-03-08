@@ -17,7 +17,9 @@ def download_excel_template(current_user: tuple = Depends(get_current_user)):
         "Invoice_Number": ["INV-001", ""],
         "Invoice_Date": ["15/01/2024", ""],
         "Supplier_Name": ["ABC Pharmaceuticals", ""],
+        "Supplier_Address": ["123 Medical Street, Mumbai", ""],
         "Supplier_GSTIN": ["29ABCDE1234F1Z5", ""],
+        "Supplier_DL_Numbers": ["DL-123, DL-456", ""],
         "Supplier_Phone": ["9876543210", ""],
         "Composition": ["Paracetamol 500mg", "Amoxicillin 250mg"],
         "Product_Name": ["Dolo 650", "Amoxil"],
@@ -53,14 +55,14 @@ def download_excel_template(current_user: tuple = Depends(get_current_user)):
         # Add instructions sheet
         instructions = pd.DataFrame({
             "Column Name": [
-                "Invoice_Number", "Invoice_Date", "Supplier_Name", "Supplier_GSTIN",
+                "Invoice_Number", "Invoice_Date", "Supplier_Name", "Supplier_Address", "Supplier_GSTIN", "Supplier_DL_Numbers", "Supplier_Phone",
                 "Composition", "Product_Name", "Manufacturer", "HSN_Code", "Batch_Number",
                 "Package", "Unit", "Quantity", "Manufacturing_Date", "Expiry_Date",
                 "MRP", "Unit_Price", "Profit_Margin", "Discount_On_Purchase",
                 "Taxable_Amount", "CGST_Percent", "CGST_Amount", "SGST_Percent", "SGST_Amount"
             ],
             "Required": [
-                "Yes", "Yes", "Yes", "No",
+                "Yes", "Yes", "At least one", "At least one", "At least one", "At least one", "At least one",
                 "No", "Yes", "No", "No", "Yes",
                 "No", "No", "Yes", "No", "No",
                 "No", "No", "No", "No",
@@ -69,8 +71,11 @@ def download_excel_template(current_user: tuple = Depends(get_current_user)):
             "Description": [
                 "Unique invoice number (fill only in first row)",
                 "Date in DD/MM/YYYY format (fill only in first row)",
-                "Supplier/Vendor name (fill only in first row)",
-                "15-digit GSTIN (fill only in first row)",
+                "Supplier/Vendor name (fill only in first row, at least one supplier field required)",
+                "Complete supplier address (fill only in first row, at least one supplier field required)",
+                "15-digit GSTIN (fill only in first row, at least one supplier field required)",
+                "Drug license numbers comma-separated (fill only in first row, at least one supplier field required)",
+                "10-digit contact number (fill only in first row, at least one supplier field required)",
                 "Generic/Salt name (e.g., Paracetamol 500mg)",
                 "Brand/Product name (required for each item)",
                 "Manufacturer code (e.g., CIPLA, SUN)",
