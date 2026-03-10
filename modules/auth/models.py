@@ -4,6 +4,9 @@ from datetime import datetime
 from app.database.database import Base
 import uuid
 
+# Import distributor model
+from .distributor.models import Distributor
+
 class SuperAdmin(Base):
     __tablename__ = "super_admins"
     
@@ -60,6 +63,7 @@ class Shop(Base):
     created_at = Column(DateTime, default=datetime.now)
     
     staff = relationship("Staff", back_populates="shop", cascade="all, delete-orphan")
+    distributors = relationship("Distributor", secondary="distributor_shops", back_populates="shops")
 
 class Staff(Base):
     __tablename__ = "staff"

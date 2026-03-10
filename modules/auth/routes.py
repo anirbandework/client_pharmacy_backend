@@ -413,6 +413,14 @@ def get_organizations(
     
     return {"organizations": org_list}
 
+@router.get("/super-admin/all-shops", response_model=List[schemas.Shop])
+def get_all_shops_super(
+    super_admin: models.SuperAdmin = Depends(get_current_super_admin),
+    db: Session = Depends(get_db)
+):
+    """SuperAdmin gets all shops across all organizations"""
+    return db.query(models.Shop).all()
+
 @router.put("/super-admin/shops/{shop_id}", response_model=schemas.Shop)
 def update_shop_super(
     shop_id: int,

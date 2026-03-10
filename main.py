@@ -23,6 +23,8 @@ from modules.invoice_analyzer.pricing_routes import router as invoice_pricing_ro
 from modules.stock_audit.routes import router as stock_router
 from modules.profit_analysis.routes import router as profit_router
 from modules.auth.routes import router as auth_router
+from modules.auth.distributor.routes import router as distributor_router
+from modules.distributor_invoice.routes import router as distributor_invoice_router
 from modules.auth.salary_management.routes import router as salary_router
 from modules.auth.attendance.routes import router as attendance_router
 from modules.auth.rbac.routes import router as rbac_router
@@ -58,6 +60,7 @@ from modules.notifications.models import (
     Notification, NotificationShopTarget, NotificationStaffTarget, NotificationRead
 )
 from modules.invoice_analyzer.models import PurchaseInvoice, PurchaseInvoiceItem
+from modules.distributor_invoice.models import DistributorInvoice, DistributorInvoiceItem
 from modules.feedback.models import Feedback
 from modules.auth.rbac.models import Module, OrganizationModulePermission
 
@@ -161,6 +164,8 @@ app.add_middleware(RateLimitMiddleware)
 
 # Module routes
 app.include_router(auth_router, prefix="/api/auth", tags=["Authentication"])
+app.include_router(distributor_router, prefix="/api/auth/distributors", tags=["Distributors"])
+app.include_router(distributor_invoice_router, tags=["Distributor Invoices"])
 app.include_router(rbac_router, prefix="/api/rbac", tags=["RBAC"])
 app.include_router(salary_router, prefix="/api/salary", tags=["Salary Management"])
 app.include_router(attendance_router, prefix="/api/attendance", tags=["Attendance System"])

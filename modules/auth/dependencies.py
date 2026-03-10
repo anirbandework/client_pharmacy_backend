@@ -11,7 +11,7 @@ def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db)
 ):
-    """Get current authenticated user (super_admin, admin or staff)"""
+    """Get current authenticated user (super_admin, admin, staff, or distributor)"""
     token = credentials.credentials
     token_data = AuthService.decode_token(token)
     
@@ -27,6 +27,8 @@ def get_current_user(
         user = db.query(models.Admin).filter(models.Admin.id == token_data.user_id).first()
     elif token_data.user_type == "staff":
         user = db.query(models.Staff).filter(models.Staff.id == token_data.user_id).first()
+    elif token_data.user_type == "distributor":
+        user = db.query(models.Distributor).filter(models.Distributor.id == token_data.user_id).first()
     else:
         raise HTTPException(status_code=401, detail="Invalid user type")
     
@@ -62,6 +64,12 @@ def get_shop_context(current_user: dict = Depends(get_current_user)):
     
     # Admin and SuperAdmin don't have automatic shop context
     return None
+
+def get_current_distributor(current_user: dict = Depends(get_current_user)):
+    """Require distributor authentication"""
+    if current_user["token_data"].user_type != "distributor":
+        raise HTTPException(status_code=403, detail="Distributor access required")
+    return current_user["user"]
 
 def get_organization_context(current_user: dict = Depends(get_current_user)):
     """Get organization context from authenticated admin"""

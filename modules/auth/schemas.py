@@ -2,6 +2,9 @@ from pydantic import BaseModel, EmailStr, field_validator
 from typing import Optional, List
 from datetime import datetime, date
 
+# Import distributor schemas
+from .distributor.schemas import Distributor as DistributorSchema, DistributorCreate, DistributorUpdate, DistributorLogin, DistributorSignupRequest
+
 # SuperAdmin Schemas
 class SuperAdminCreate(BaseModel):
     email: EmailStr
@@ -275,15 +278,17 @@ class StaffSignupRequest(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str
-    user_type: str  # super_admin, admin, staff
-    organization_id: Optional[str] = None  # For admins
+    user_type: str  # super_admin, admin, staff, distributor
+    organization_id: Optional[str] = None  # For admins only
     shop_id: Optional[int] = None
     shop_name: Optional[str] = None
+    distributor_id: Optional[int] = None
+    company_name: Optional[str] = None
 
 class TokenData(BaseModel):
     user_id: int
-    user_type: str  # super_admin, admin, staff
-    organization_id: Optional[str] = None  # For admins
+    user_type: str  # super_admin, admin, staff, distributor
+    organization_id: Optional[str] = None  # For admins only
     shop_code: Optional[str] = None  # For staff
     email: Optional[str] = None
     user_name: Optional[str] = None

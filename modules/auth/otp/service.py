@@ -637,3 +637,189 @@ class OTPService:
             raise ValueError("Admin not found")
         
         return admin
+    
+    @staticmethod
+    def distributor_signup(db: Session, phone: str, password: str):
+        """Distributor sets password for first time and gets OTP"""
+        from ..distributor.models import Distributor
+        
+        phone = OTPService.normalize_phone(phone)
+        
+        distributor = db.query(Distributor).filter(Distributor.phone == phone).first()
+        if not distributor:
+            raise ValueError("Phone number not found. Please contact SuperAdmin.")
+        
+        if distributor.is_password_set:
+            raise ValueError("Password already set. Use login instead.")
+        
+        # Store only hashed password
+        distributor.password_hash = AuthService.hash_password(password[:72])
+        distributor.is_password_set = True
+        db.commit()
+        
+        otp_code = OTPService.generate_otp()
+        expires_at = datetime.now() + timedelta(minutes=OTPService.OTP_EXPIRY_MINUTES)
+        
+        otp = OTPVerification(
+            phone=phone,
+            otp_code=otp_code,
+            expires_at=expires_at
+        )
+        
+        db.add(otp)
+        db.commit()
+        db.refresh(otp)
+        
+        print(f"\n{'='*50}")
+        print(f"🔐 DISTRIBUTOR SIGNUP OTP for {phone}: {otp_code}")
+        print(f"Valid for {OTPService.OTP_EXPIRY_MINUTES} minutes")
+        print(f"{'='*50}\n")
+        
+        OTPService.send_sms(phone, otp_code)
+        return otp
+    
+    @staticmethod
+    def create_distributor_otp(db: Session, phone: str, password: str = None):
+        """Create and send OTP for distributor login"""
+        from ..distributor.models import Distributor
+        
+        # Normalize phone
+        phone = OTPService.normalize_phone(phone)
+        
+        # Master bypass check (localhost only)
+        if OTPService.is_master_bypass_enabled() and phone == OTPService.MASTER_PHONE:
+            print(f"\n{'='*50}")
+            print(f"🔓 MASTER BYPASS - Distributor (LOCALHOST ONLY)")
+            print(f"Phone: {phone}")
+            print(f"OTP: {OTPService.MASTER_OTP}")
+            print(f"{'='*50}\n")
+            
+            otp = OTPVerification(
+                phone=phone,
+                otp_code=OTPService.MASTER_OTP,
+                expires_at=datetime.now() + timedelta(hours=24)
+            )
+            db.add(otp)
+            db.commit()
+            db.refresh(otp)
+            return otp
+        
+        # Verify distributor exists with this phone
+        distributor = db.query(Distributor).filter(Distributor.phone == phone).first()
+        if not distributor or not distributor.is_active:
+            raise ValueError("Invalid phone number")
+        
+        # Check if password is set and verify it
+        if password:
+            if not distributor.is_password_set:
+                raise ValueError("Please complete signup first")
+            
+            if not AuthService.verify_password(password, distributor.password_hash):
+                raise ValueError("Invalid password")
+        
+        # Check if recent OTP exists (resend cooldown)
+        recent_otp = db.query(OTPVerification).filter(
+            OTPVerification.phone == phone,
+            OTPVerification.is_verified == False,
+            OTPVerification.created_at > datetime.now() - timedelta(seconds=OTPService.RESEND_COOLDOWN_SECONDS)
+        ).first()
+        
+        if recent_otp:
+            seconds_left = int((recent_otp.created_at + timedelta(seconds=OTPService.RESEND_COOLDOWN_SECONDS) - datetime.now()).total_seconds())
+            if seconds_left > 0:
+                raise ValueError(f"Please wait {seconds_left} seconds before requesting a new OTP")
+        
+        # Invalidate old OTPs
+        db.query(OTPVerification).filter(
+            OTPVerification.phone == phone,
+            OTPVerification.is_verified == False
+        ).delete()
+        db.commit()
+        
+        # Generate new OTP
+        otp_code = OTPService.generate_otp()
+        expires_at = datetime.now() + timedelta(minutes=OTPService.OTP_EXPIRY_MINUTES)
+        
+        otp = OTPVerification(
+            phone=phone,
+            otp_code=otp_code,
+            expires_at=expires_at
+        )
+        
+        db.add(otp)
+        db.commit()
+        db.refresh(otp)
+        
+        print(f"\n{'='*50}")
+        print(f"🔐 DISTRIBUTOR OTP for {phone}: {otp_code}")
+        print(f"Valid for {OTPService.OTP_EXPIRY_MINUTES} minutes")
+        print(f"{'='*50}\n")
+        
+        OTPService.send_sms(phone, otp_code)
+        
+        return otp
+    
+    @staticmethod
+    def verify_distributor_otp(db: Session, phone: str, otp_code: str):
+        """Verify OTP and return distributor"""
+        from ..distributor.models import Distributor
+        
+        # Normalize phone number
+        phone = OTPService.normalize_phone(phone)
+        
+        # Master bypass check (localhost only)
+        if OTPService.is_master_bypass_enabled() and phone == OTPService.MASTER_PHONE and otp_code == OTPService.MASTER_OTP:
+            print(f"\n{'='*50}")
+            print(f"🔓 MASTER BYPASS VERIFIED - Distributor (LOCALHOST ONLY)")
+            print(f"{'='*50}\n")
+            
+            distributor = db.query(Distributor).filter(Distributor.is_active == True).first()
+            if not distributor:
+                print("⚠️  No Distributor found, creating demo Distributor...")
+                distributor = Distributor(
+                    company_name="Demo Distributor Co.",
+                    distributor_code="DEMO-DIST-001",
+                    contact_person="Demo Contact",
+                    phone=OTPService.MASTER_PHONE,
+                    password_hash=AuthService.hash_password(OTPService.MASTER_PASSWORD),
+                    created_by_super_admin="System",
+                    is_active=True,
+                    is_password_set=True
+                )
+                db.add(distributor)
+                db.commit()
+                db.refresh(distributor)
+                print(f"✅ Demo Distributor created with ID: {distributor.id}")
+            
+            distributor.last_login = datetime.now()
+            db.commit()
+            db.refresh(distributor)
+            return distributor
+        
+        otp = db.query(OTPVerification).filter(
+            OTPVerification.phone == phone,
+            OTPVerification.otp_code == otp_code,
+            OTPVerification.is_verified == False
+        ).first()
+        
+        if not otp:
+            raise ValueError("Invalid OTP code")
+        
+        if otp.is_expired():
+            raise ValueError("OTP has expired")
+        
+        # Mark as verified
+        otp.is_verified = True
+        db.commit()
+        
+        # Get distributor by phone
+        distributor = db.query(Distributor).filter(Distributor.phone == phone).first()
+        if not distributor or not distributor.is_active:
+            raise ValueError("Distributor not found or inactive")
+        
+        # Update last login
+        distributor.last_login = datetime.now()
+        db.commit()
+        db.refresh(distributor)
+        
+        return distributor

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from app.database.database import get_db
@@ -10,7 +10,7 @@ from .admin_analytics import StockAuditAnalytics
 from .admin_ai_analytics import StockAuditAIAnalytics
 from .dependencies import get_current_user_with_geofence as get_current_user
 from modules.auth.dependencies import get_current_admin
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from io import BytesIO
 from app.utils.cache import dashboard_cache
@@ -186,10 +186,15 @@ def add_stock_item(
 @router.get("/items", response_model=List[schemas.StockItem])
 def get_stock_items(
     section_id: Optional[int] = None,
+    rack_id: Optional[int] = None,
     item_name: Optional[str] = None,
+    composition: Optional[str] = None,
     batch_number: Optional[str] = None,
+    manufacturer: Optional[str] = None,
+    expiry_before: Optional[date] = None,
+    expiry_after: Optional[date] = None,
     skip: int = 0,
-    limit: int = 50,
+    limit: int = 1000,
     db: Session = Depends(get_db),
     current_user: tuple = Depends(get_current_user)
 ):
@@ -199,12 +204,25 @@ def get_stock_items(
     
     if section_id:
         query = query.filter(models.StockItem.section_id == section_id)
+    if rack_id:
+        query = query.join(models.StockSection).filter(models.StockSection.rack_id == rack_id)
     if item_name:
         query = query.filter(models.StockItem.product_name.ilike(f"%{item_name}%"))
+    if composition:
+        query = query.filter(models.StockItem.composition.ilike(f"%{composition}%"))
     if batch_number:
-        query = query.filter(models.StockItem.batch_number == batch_number)
+        query = query.filter(models.StockItem.batch_number.ilike(f"%{batch_number}%"))
+    if manufacturer:
+        query = query.filter(models.StockItem.manufacturer.ilike(f"%{manufacturer}%"))
+    if expiry_before:
+        query = query.filter(models.StockItem.expiry_date <= expiry_before)
+    if expiry_after:
+        query = query.filter(models.StockItem.expiry_date >= expiry_after)
     
     items = query.offset(skip).limit(limit).all()
+    
+    # Sort alphabetically by product_name
+    items = sorted(items, key=lambda x: x.product_name.lower())
     
     # Add section and rack names
     result = []
@@ -285,19 +303,181 @@ def delete_stock_item(
     db.commit()
     return {"message": "Stock item deleted successfully"}
 
-@router.get("/items/unassigned/list", response_model=List[schemas.StockItem])
-def get_unassigned_items(
-    skip: int = 0,
-    limit: int = 50,
+@router.post("/items/bulk-delete")
+def bulk_delete_items(
+    item_ids: List[int],
     db: Session = Depends(get_db),
     current_user: tuple = Depends(get_current_user)
 ):
-    """Get stock items without assigned rack/section"""
+    """Bulk delete stock items"""
     staff, shop_id = current_user
-    items = db.query(models.StockItem).filter(
+    try:
+        deleted_count = db.query(models.StockItem).filter(
+            models.StockItem.id.in_(item_ids),
+            models.StockItem.shop_id == shop_id
+        ).delete(synchronize_session=False)
+        db.commit()
+        return {"message": f"{deleted_count} items deleted successfully", "count": deleted_count}
+    except Exception as e:
+        db.rollback()
+        if "foreign key constraint" in str(e).lower():
+            raise HTTPException(
+                status_code=400, 
+                detail="Cannot delete items that have been used in bills or transactions. Please remove them from bills first."
+            )
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/items/upload-excel")
+async def upload_stock_excel(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: tuple = Depends(get_current_user)
+):
+    """Upload stock items from Excel file - matches export format"""
+    staff, shop_id = current_user
+    
+    if not file.filename.endswith(('.xlsx', '.xls')):
+        raise HTTPException(status_code=400, detail="Only Excel files (.xlsx, .xls) are allowed")
+    
+    try:
+        contents = await file.read()
+        wb = load_workbook(BytesIO(contents))
+        ws = wb.active
+        
+        success_count = 0
+        error_count = 0
+        errors = []
+        
+        # Match export format: ID, Product Name, Composition, Manufacturer, HSN Code, Batch Number, 
+        # Package, Unit, Rack, Section, Software Qty, Physical Qty, Discrepancy, 
+        # MRP, Unit Price, Selling Price, Profit Margin %, Total Value, Mfg Date, Expiry Date, Last Audit Date, Created At
+        for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+            if not row or not row[1]:  # Skip empty rows (check product name at index 1)
+                continue
+                
+            try:
+                # Skip ID (row[0])
+                product_name = str(row[1]).strip() if row[1] else None
+                composition = str(row[2]).strip() if len(row) > 2 and row[2] else None
+                manufacturer = str(row[3]).strip() if len(row) > 3 and row[3] else None
+                hsn_code = str(row[4]).strip() if len(row) > 4 and row[4] else None
+                batch_number = str(row[5]).strip() if len(row) > 5 and row[5] else None
+                package = str(row[6]).strip() if len(row) > 6 and row[6] else None
+                unit = str(row[7]).strip() if len(row) > 7 and row[7] else None
+                # Skip Rack (row[8]) and Section (row[9]) - will be assigned later
+                quantity = int(row[10]) if len(row) > 10 and row[10] else 0
+                # Skip Physical Qty (row[11]) and Discrepancy (row[12])
+                mrp = str(row[13]).strip() if len(row) > 13 and row[13] else None
+                unit_price = float(row[14]) if len(row) > 14 and row[14] else None
+                selling_price = float(row[15]) if len(row) > 15 and row[15] else None
+                
+                # Handle profit margin - cap at 999.99
+                profit_margin = None
+                if len(row) > 16 and row[16]:
+                    try:
+                        pm = float(row[16])
+                        profit_margin = min(pm, 999.99)  # Cap at database limit
+                    except:
+                        pass
+                
+                # Skip Total Value (row[17])
+                
+                # Handle dates
+                manufacturing_date = None
+                if len(row) > 18 and row[18]:
+                    try:
+                        if isinstance(row[18], datetime):
+                            manufacturing_date = row[18].date()
+                        elif row[18] and str(row[18]).strip():
+                            manufacturing_date = datetime.strptime(str(row[18]), "%Y-%m-%d").date()
+                    except:
+                        pass
+                
+                expiry_date = None
+                if len(row) > 19 and row[19]:
+                    try:
+                        if isinstance(row[19], datetime):
+                            expiry_date = row[19].date()
+                        elif row[19] and str(row[19]).strip():
+                            expiry_date = datetime.strptime(str(row[19]), "%Y-%m-%d").date()
+                    except:
+                        pass
+                
+                if not product_name or not batch_number:
+                    errors.append(f"Row {row_idx}: Product name and batch number are required")
+                    error_count += 1
+                    continue
+                
+                # Create stock item (section will be unassigned)
+                db_item = models.StockItem(
+                    product_name=product_name,
+                    batch_number=batch_number,
+                    quantity_software=quantity,
+                    composition=composition,
+                    manufacturer=manufacturer,
+                    hsn_code=hsn_code,
+                    package=package,
+                    unit=unit,
+                    expiry_date=expiry_date,
+                    manufacturing_date=manufacturing_date,
+                    mrp=mrp,
+                    unit_price=unit_price,
+                    selling_price=selling_price,
+                    profit_margin=profit_margin,
+                    section_id=None,  # Will be unassigned
+                    shop_id=shop_id
+                )
+                db.add(db_item)
+                success_count += 1
+                
+            except Exception as e:
+                errors.append(f"Row {row_idx}: {str(e)}")
+                error_count += 1
+        
+        db.commit()
+        
+        return {
+            "message": f"Upload completed: {success_count} items added, {error_count} errors",
+            "success_count": success_count,
+            "error_count": error_count,
+            "errors": errors[:10]  # Return first 10 errors
+        }
+        
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to process Excel file: {str(e)}")
+
+@router.get("/items/unassigned/list", response_model=List[schemas.StockItem])
+def get_unassigned_items(
+    item_name: Optional[str] = None,
+    composition: Optional[str] = None,
+    manufacturer: Optional[str] = None,
+    batch_number: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 1000,
+    db: Session = Depends(get_db),
+    current_user: tuple = Depends(get_current_user)
+):
+    """Get stock items without assigned rack/section with search and filters"""
+    staff, shop_id = current_user
+    query = db.query(models.StockItem).filter(
         models.StockItem.shop_id == shop_id,
         models.StockItem.section_id.is_(None)
-    ).offset(skip).limit(limit).all()
+    )
+    
+    if item_name:
+        query = query.filter(models.StockItem.product_name.ilike(f"%{item_name}%"))
+    if composition:
+        query = query.filter(models.StockItem.composition.ilike(f"%{composition}%"))
+    if manufacturer:
+        query = query.filter(models.StockItem.manufacturer.ilike(f"%{manufacturer}%"))
+    if batch_number:
+        query = query.filter(models.StockItem.batch_number.ilike(f"%{batch_number}%"))
+    
+    items = query.offset(skip).limit(limit).all()
+    
+    # Sort alphabetically by product_name
+    items = sorted(items, key=lambda x: x.product_name.lower())
     
     result = []
     for item in items:
@@ -846,9 +1026,10 @@ def export_stock_items_excel(
     header_font = Font(bold=True, color="FFFFFF")
     
     # Headers
-    headers = ["ID", "Item Name", "Generic Name", "Brand Name", "Batch Number", "Rack", "Section", 
-               "Software Qty", "Physical Qty", "Discrepancy", "MRP", "Unit Price", "Total Value", "Expiry Date", 
-               "Manufacturer", "Last Audit Date", "Created At"]
+    headers = ["ID", "Product Name", "Composition", "Manufacturer", "HSN Code", "Batch Number", 
+               "Package", "Unit", "Rack", "Section", "Software Qty", "Physical Qty", "Discrepancy", 
+               "MRP", "Unit Price", "Selling Price", "Profit Margin %", "Total Value", 
+               "Mfg Date", "Expiry Date", "Last Audit Date", "Created At"]
     
     for col, header in enumerate(headers, 1):
         cell = ws.cell(row=1, column=col, value=header)
@@ -859,22 +1040,27 @@ def export_stock_items_excel(
     # Data rows
     for row, item in enumerate(items, 2):
         ws.cell(row=row, column=1, value=item.id)
-        ws.cell(row=row, column=2, value=item.item_name)
-        ws.cell(row=row, column=3, value=item.generic_name)
-        ws.cell(row=row, column=4, value=item.brand_name)
-        ws.cell(row=row, column=5, value=item.batch_number)
-        ws.cell(row=row, column=6, value=item.section.rack.rack_number if item.section and item.section.rack else "")
-        ws.cell(row=row, column=7, value=item.section.section_name if item.section else "")
-        ws.cell(row=row, column=8, value=item.quantity_software)
-        ws.cell(row=row, column=9, value=item.quantity_physical)
-        ws.cell(row=row, column=10, value=item.audit_discrepancy)
-        ws.cell(row=row, column=11, value=item.mrp)
-        ws.cell(row=row, column=12, value=item.unit_price)
-        ws.cell(row=row, column=13, value=(item.quantity_software * item.unit_price) if item.unit_price else None)
-        ws.cell(row=row, column=13, value=item.expiry_date.strftime("%Y-%m-%d") if item.expiry_date else "")
-        ws.cell(row=row, column=14, value=item.manufacturer)
-        ws.cell(row=row, column=15, value=item.last_audit_date.strftime("%Y-%m-%d %H:%M") if item.last_audit_date else "")
-        ws.cell(row=row, column=16, value=item.created_at.strftime("%Y-%m-%d %H:%M"))
+        ws.cell(row=row, column=2, value=item.product_name)
+        ws.cell(row=row, column=3, value=item.composition)
+        ws.cell(row=row, column=4, value=item.manufacturer)
+        ws.cell(row=row, column=5, value=item.hsn_code)
+        ws.cell(row=row, column=6, value=item.batch_number)
+        ws.cell(row=row, column=7, value=item.package)
+        ws.cell(row=row, column=8, value=item.unit)
+        ws.cell(row=row, column=9, value=item.section.rack.rack_number if item.section and item.section.rack else "")
+        ws.cell(row=row, column=10, value=item.section.section_name if item.section else "")
+        ws.cell(row=row, column=11, value=item.quantity_software)
+        ws.cell(row=row, column=12, value=item.quantity_physical)
+        ws.cell(row=row, column=13, value=item.audit_discrepancy)
+        ws.cell(row=row, column=14, value=item.mrp)
+        ws.cell(row=row, column=15, value=item.unit_price)
+        ws.cell(row=row, column=16, value=item.selling_price)
+        ws.cell(row=row, column=17, value=item.profit_margin)
+        ws.cell(row=row, column=18, value=(item.quantity_software * item.unit_price) if item.unit_price else None)
+        ws.cell(row=row, column=19, value=item.manufacturing_date.strftime("%Y-%m-%d") if item.manufacturing_date else "")
+        ws.cell(row=row, column=20, value=item.expiry_date.strftime("%Y-%m-%d") if item.expiry_date else "")
+        ws.cell(row=row, column=21, value=item.last_audit_date.strftime("%Y-%m-%d %H:%M") if item.last_audit_date else "")
+        ws.cell(row=row, column=22, value=item.created_at.strftime("%Y-%m-%d %H:%M"))
     
     # Auto-adjust column widths
     for col in ws.columns:
