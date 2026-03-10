@@ -252,21 +252,27 @@ async def upload_invoice_pdf(
             except:
                 pass
         
+        # Truncate string fields to prevent database errors
+        def truncate_str(value, max_length=255):
+            if value is None:
+                return None
+            return str(value)[:max_length] if len(str(value)) > max_length else str(value)
+        
         item = models.PurchaseInvoiceItem(
             invoice_id=invoice.id,
             shop_id=shop_id,
-            composition=item_data.get("composition"),
-            manufacturer=item_data.get("manufacturer"),
-            hsn_code=item_data.get("hsn_code"),
-            product_name=item_data.get("product_name") or "Unknown Product",
-            batch_number=item_data.get("batch_number"),
+            composition=truncate_str(item_data.get("composition")),
+            manufacturer=truncate_str(item_data.get("manufacturer")),
+            hsn_code=truncate_str(item_data.get("hsn_code")),
+            product_name=truncate_str(item_data.get("product_name") or "Unknown Product"),
+            batch_number=truncate_str(item_data.get("batch_number")),
             quantity=item_data.get("quantity", 1),
             free_quantity=item_data.get("free_quantity", 0.0),
-            package=item_data.get("package"),
-            unit=item_data.get("unit"),
+            package=truncate_str(item_data.get("package")),
+            unit=truncate_str(item_data.get("unit")),
             manufacturing_date=manufacturing_date,
             expiry_date=expiry_date,
-            mrp=item_data.get("mrp"),
+            mrp=truncate_str(item_data.get("mrp")),
             unit_price=item_data.get("unit_price", 0.0),
             selling_price=item_data.get("selling_price", 0.0),
             profit_margin=item_data.get("profit_margin", 0.0),
@@ -415,6 +421,12 @@ def update_invoice(
         models.PurchaseInvoiceItem.invoice_id == invoice_id
     ).delete()
     
+    # Truncate string fields to prevent database errors
+    def truncate_str(value, max_length=255):
+        if value is None:
+            return None
+        return str(value)[:max_length] if len(str(value)) > max_length else str(value)
+    
     # Add updated items
     for item_data in invoice_data.items:
         expiry_date = None
@@ -428,18 +440,18 @@ def update_invoice(
         item = models.PurchaseInvoiceItem(
             invoice_id=invoice.id,
             shop_id=shop_id,
-            composition=item_data.composition,
-            manufacturer=item_data.manufacturer,
-            hsn_code=item_data.hsn_code,
-            product_name=item_data.product_name or "Unknown Product",
-            batch_number=item_data.batch_number,
+            composition=truncate_str(item_data.composition),
+            manufacturer=truncate_str(item_data.manufacturer),
+            hsn_code=truncate_str(item_data.hsn_code),
+            product_name=truncate_str(item_data.product_name or "Unknown Product"),
+            batch_number=truncate_str(item_data.batch_number),
             quantity=item_data.quantity,
             free_quantity=item_data.free_quantity,
-            package=item_data.package,
-            unit=item_data.unit,
+            package=truncate_str(item_data.package),
+            unit=truncate_str(item_data.unit),
             manufacturing_date=manufacturing_date,
             expiry_date=expiry_date,
-            mrp=item_data.mrp,
+            mrp=truncate_str(item_data.mrp),
             unit_price=item_data.unit_price,
             selling_price=item_data.selling_price,
             profit_margin=item_data.profit_margin,
@@ -687,22 +699,28 @@ def create_invoice_manually(
     db.add(invoice)
     db.flush()
     
+    # Truncate string fields to prevent database errors
+    def truncate_str(value, max_length=255):
+        if value is None:
+            return None
+        return str(value)[:max_length] if len(str(value)) > max_length else str(value)
+    
     for item_data in invoice_data.items:
         item = models.PurchaseInvoiceItem(
             invoice_id=invoice.id,
             shop_id=shop_id,
-            composition=item_data.composition,
-            manufacturer=item_data.manufacturer,
-            hsn_code=item_data.hsn_code,
-            product_name=item_data.product_name or "Unknown Product",
-            batch_number=item_data.batch_number,
+            composition=truncate_str(item_data.composition),
+            manufacturer=truncate_str(item_data.manufacturer),
+            hsn_code=truncate_str(item_data.hsn_code),
+            product_name=truncate_str(item_data.product_name or "Unknown Product"),
+            batch_number=truncate_str(item_data.batch_number),
             quantity=item_data.quantity,
             free_quantity=item_data.free_quantity,
-            package=item_data.package,
-            unit=item_data.unit,
+            package=truncate_str(item_data.package),
+            unit=truncate_str(item_data.unit),
             manufacturing_date=item_data.manufacturing_date if isinstance(item_data.manufacturing_date, date) else None,
             expiry_date=item_data.expiry_date if isinstance(item_data.expiry_date, date) else None,
-            mrp=item_data.mrp,
+            mrp=truncate_str(item_data.mrp),
             unit_price=item_data.unit_price,
             selling_price=item_data.selling_price,
             profit_margin=item_data.profit_margin,

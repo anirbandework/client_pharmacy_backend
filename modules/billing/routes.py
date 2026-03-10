@@ -10,8 +10,22 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from io import BytesIO
 from app.utils.cache import dashboard_cache
+import os
 
 router = APIRouter()
+
+@router.get("/user-guide")
+def get_user_guide():
+    """Get billing system user guide"""
+    try:
+        guide_path = os.path.join(os.path.dirname(__file__), "BILLING_USER_GUIDE.md")
+        with open(guide_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        return {"content": content}
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="User guide not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error reading user guide: {str(e)}")
 
 # MEDICINE SEARCH
 

@@ -194,3 +194,78 @@ class StockAdjustment(Base):
     adjustment_date = Column(DateTime, default=datetime.now)
     
     stock_item = relationship("StockItem", back_populates="adjustments")
+
+class ExcelUpload(Base):
+    __tablename__ = "excel_uploads"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False, index=True)
+    
+    # Upload info
+    filename = Column(String, nullable=False)
+    uploaded_by_staff_id = Column(Integer, ForeignKey("staff.id"), nullable=False)
+    uploaded_by_staff_name = Column(String, nullable=False)
+    uploaded_at = Column(DateTime, default=datetime.now)
+    
+    # Verification stages
+    staff_verified = Column(Boolean, default=False)
+    staff_verified_by_id = Column(Integer, ForeignKey("staff.id"), nullable=True)
+    staff_verified_by_name = Column(String, nullable=True)
+    staff_verified_at = Column(DateTime, nullable=True)
+    
+    admin_verified = Column(Boolean, default=False)
+    admin_verified_by_id = Column(Integer, nullable=True)
+    admin_verified_by_name = Column(String, nullable=True)
+    admin_verified_at = Column(DateTime, nullable=True)
+    
+    # Status
+    status = Column(String, default="pending_staff_verification")
+    
+    # Stats
+    total_items = Column(Integer, default=0)
+    success_count = Column(Integer, default=0)
+    error_count = Column(Integer, default=0)
+    
+    # Notes
+    upload_notes = Column(Text, nullable=True)
+    staff_notes = Column(Text, nullable=True)
+    admin_notes = Column(Text, nullable=True)
+    rejection_reason = Column(Text, nullable=True)
+    
+    items = relationship("ExcelUploadItem", back_populates="upload", cascade="all, delete-orphan")
+
+class ExcelUploadItem(Base):
+    __tablename__ = "excel_upload_items"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False, index=True)
+    upload_id = Column(Integer, ForeignKey("excel_uploads.id"), nullable=False)
+    
+    # Item data
+    product_name = Column(String, nullable=False)
+    composition = Column(String, nullable=True)
+    manufacturer = Column(String, nullable=True)
+    hsn_code = Column(String, nullable=True)
+    batch_number = Column(String, nullable=False)
+    package = Column(String, nullable=True)
+    unit = Column(String, nullable=True)
+    quantity_software = Column(Integer, default=0)
+    mrp = Column(String, nullable=True)
+    unit_price = Column(Float, nullable=True)
+    selling_price = Column(Float, nullable=True)
+    profit_margin = Column(Float, nullable=True)
+    manufacturing_date = Column(Date, nullable=True)
+    expiry_date = Column(Date, nullable=True)
+    section_id = Column(Integer, ForeignKey("stock_sections_audit.id"), nullable=True)
+    
+    # Status
+    status = Column(String, default="pending")
+    modified_by_staff = Column(Boolean, default=False)
+    modified_by_admin = Column(Boolean, default=False)
+    
+    # Final stock item reference (when approved)
+    stock_item_id = Column(Integer, ForeignKey("stock_items_audit.id"), nullable=True)
+    
+    upload = relationship("ExcelUpload", back_populates="items")
+    section = relationship("StockSection")
+    stock_item = relationship("StockItem")

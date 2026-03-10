@@ -146,6 +146,12 @@ def admin_update_invoice(
         models.PurchaseInvoiceItem.invoice_id == invoice_id
     ).delete()
     
+    # Truncate string fields to prevent database errors
+    def truncate_str(value, max_length=255):
+        if value is None:
+            return None
+        return str(value)[:max_length] if len(str(value)) > max_length else str(value)
+    
     # Add updated items
     for item_data in invoice_data['items']:
         expiry_date = parse_date(item_data.get('expiry_date')) if item_data.get('expiry_date') else None
@@ -154,18 +160,18 @@ def admin_update_invoice(
         item = models.PurchaseInvoiceItem(
             invoice_id=invoice.id,
             shop_id=invoice.shop_id,
-            composition=item_data.get('composition'),
-            manufacturer=item_data.get('manufacturer'),
-            hsn_code=item_data.get('hsn_code'),
-            product_name=item_data.get('product_name') or "Unknown Product",
-            batch_number=item_data.get('batch_number'),
+            composition=truncate_str(item_data.get('composition')),
+            manufacturer=truncate_str(item_data.get('manufacturer')),
+            hsn_code=truncate_str(item_data.get('hsn_code')),
+            product_name=truncate_str(item_data.get('product_name') or "Unknown Product"),
+            batch_number=truncate_str(item_data.get('batch_number')),
             quantity=item_data['quantity'],
             free_quantity=item_data.get('free_quantity', 0),
-            package=item_data.get('package'),
-            unit=item_data.get('unit'),
+            package=truncate_str(item_data.get('package')),
+            unit=truncate_str(item_data.get('unit')),
             manufacturing_date=manufacturing_date,
             expiry_date=expiry_date,
-            mrp=item_data.get('mrp'),
+            mrp=truncate_str(item_data.get('mrp')),
             unit_price=item_data['unit_price'],
             selling_price=item_data.get('selling_price', 0),
             profit_margin=item_data.get('profit_margin', 0),
@@ -233,21 +239,32 @@ def admin_delete_invoice(
                     ).count()
                     
                     if bill_item_count > 0:
+                        # Item is used in bills, just reduce quantity and clear reference
                         stock_item.quantity_software -= int(invoice_item.quantity)
                         stock_item.source_invoice_id = None
                         stock_item.updated_at = datetime.now()
                         items_in_use.append(invoice_item.product_name)
                         logger.info(f"Reversed stock for {stock_item.product_name}: -{invoice_item.quantity}")
                     else:
+                        # Item not used in bills, can be deleted or quantity reduced
                         stock_item.quantity_software -= int(invoice_item.quantity)
                         
                         if stock_item.quantity_software <= 0 and stock_item.source_invoice_id == invoice_id:
+                            # Clear the foreign key reference before deleting
+                            stock_item.source_invoice_id = None
+                            db.flush()  # Ensure FK is cleared before deletion
                             db.delete(stock_item)
                             logger.info(f"Deleted stock item {stock_item.id}")
                         else:
                             stock_item.source_invoice_id = None
                             stock_item.updated_at = datetime.now()
                             logger.info(f"Reversed stock for {stock_item.product_name}: -{invoice_item.quantity}")
+            
+            # Clear all foreign key references to this invoice before deletion
+            from modules.stock_audit.models import StockItem
+            db.query(StockItem).filter(
+                StockItem.source_invoice_id == invoice_id
+            ).update({"source_invoice_id": None})
             
             db.flush()
             stock_reversed = True

@@ -11,7 +11,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     USER_TYPE_LIMITS = {
         "super_admin": 500,
         "admin": 300,
-        "staff": 200,  # Increased from 100
+        "staff": 300,  # Increased from 200 for stock operations
         "anonymous": 20
     }
     
@@ -30,6 +30,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         "/api/auth/staff/send-otp": {"limit": 3, "window": 300},
         "/api/auth/staff/otp/verify": {"limit": 5, "window": 300},
         
+        # Stock audit operations - production-safe limits for bulk operations
+        "/api/stock-audit/bulk-assign": {"limit": 1000, "window": 60},  # Allow bulk operations
         # Heavy query endpoints - prevent database overload
         "/api/invoice-analyzer/admin/ai-analytics": {"limit": 10, "window": 60},
         "/api/invoice-analyzer/admin/dashboard-analytics": {"limit": 10, "window": 60}
@@ -59,6 +61,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         "/api/auth/super-admin/organizations"
     ]
     
+    # Skip rate limiting for specific patterns
+    SKIP_PATTERNS = [
+        # Remove blanket skip for stock audit - too risky for production
+    ]
+    
     def _create_rate_limit_response(self, retry_after: int):
         """Create a properly formatted 429 response with CORS headers"""
         return JSONResponse(
@@ -76,6 +83,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         if request.url.path in self.SKIP_RATE_LIMIT or request.method == "OPTIONS":
             return await call_next(request)
+        
+        # Check skip patterns
+        for pattern in self.SKIP_PATTERNS:
+            if pattern in request.url.path:
+                return await call_next(request)
         
         # Extract user_type from JWT token directly (middleware order issue)
         user_type = 'anonymous'
@@ -114,11 +126,23 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return await call_next(request)  # Skip other checks for performance
         
         # Endpoint-specific limits (use user_id if available, else IP)
-        if request.url.path in self.ENDPOINT_LIMITS:
-            config = self.ENDPOINT_LIMITS[request.url.path]
-            key = f"rl:ep:{request.url.path}:{user_id or client_ip}"
-            if not await redis_service.check_rate_limit(key, config["limit"], config["window"]):
-                return self._create_rate_limit_response(config["window"])
+        endpoint_path = request.url.path
+        endpoint_config = None
+        
+        # Check exact match first
+        if endpoint_path in self.ENDPOINT_LIMITS:
+            endpoint_config = self.ENDPOINT_LIMITS[endpoint_path]
+        else:
+            # Stock audit operations - higher limits but still controlled
+            if "/api/stock-audit/items/" in endpoint_path and "/assign-section" in endpoint_path:
+                endpoint_config = {"limit": 500, "window": 60}  # 500/min for individual assignments
+            elif "/api/stock-audit/bulk" in endpoint_path:
+                endpoint_config = {"limit": 10, "window": 60}   # 10 bulk operations per minute
+        
+        if endpoint_config:
+            key = f"rl:ep:{endpoint_path}:{user_id or client_ip}"
+            if not await redis_service.check_rate_limit(key, endpoint_config["limit"], endpoint_config["window"]):
+                return self._create_rate_limit_response(endpoint_config["window"])
         
         # User-level rate limit (authenticated users)
         if user_id:

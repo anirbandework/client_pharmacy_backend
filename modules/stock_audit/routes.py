@@ -49,6 +49,14 @@ def get_racks(
     staff, shop_id = current_user
     return db.query(models.StockRack).filter(models.StockRack.shop_id == shop_id).all()
 
+@router.get("/admin/racks", response_model=List[schemas.StoreRack])
+def get_admin_racks(
+    db: Session = Depends(get_db),
+    admin = Depends(get_current_admin)
+):
+    """Get all store racks for admin (all shops)"""
+    return db.query(models.StockRack).all()
+
 @router.put("/racks/{rack_id}", response_model=schemas.StoreRack)
 def update_rack(
     rack_id: int,
@@ -121,6 +129,18 @@ def get_sections(
     """Get all sections, optionally filtered by rack"""
     staff, shop_id = current_user
     query = db.query(models.StockSection).filter(models.StockSection.shop_id == shop_id)
+    if rack_id:
+        query = query.filter(models.StockSection.rack_id == rack_id)
+    return query.all()
+
+@router.get("/admin/sections", response_model=List[schemas.StoreSection])
+def get_admin_sections(
+    rack_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    admin = Depends(get_current_admin)
+):
+    """Get all sections for admin (all shops)"""
+    query = db.query(models.StockSection)
     if rack_id:
         query = query.filter(models.StockSection.rack_id == rack_id)
     return query.all()
@@ -330,10 +350,11 @@ def bulk_delete_items(
 @router.post("/items/upload-excel")
 async def upload_stock_excel(
     file: UploadFile = File(...),
+    notes: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: tuple = Depends(get_current_user)
 ):
-    """Upload stock items from Excel file - matches export format"""
+    """Upload stock items from Excel file for verification workflow"""
     staff, shop_id = current_user
     
     if not file.filename.endswith(('.xlsx', '.xls')):
@@ -344,19 +365,26 @@ async def upload_stock_excel(
         wb = load_workbook(BytesIO(contents))
         ws = wb.active
         
+        # Create upload record
+        upload = models.ExcelUpload(
+            shop_id=shop_id,
+            filename=file.filename,
+            uploaded_by_staff_id=staff.id,
+            uploaded_by_staff_name=staff.name,
+            upload_notes=notes
+        )
+        db.add(upload)
+        db.flush()  # Get upload ID
+        
         success_count = 0
         error_count = 0
         errors = []
         
-        # Match export format: ID, Product Name, Composition, Manufacturer, HSN Code, Batch Number, 
-        # Package, Unit, Rack, Section, Software Qty, Physical Qty, Discrepancy, 
-        # MRP, Unit Price, Selling Price, Profit Margin %, Total Value, Mfg Date, Expiry Date, Last Audit Date, Created At
         for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
-            if not row or not row[1]:  # Skip empty rows (check product name at index 1)
+            if not row or not row[1]:
                 continue
                 
             try:
-                # Skip ID (row[0])
                 product_name = str(row[1]).strip() if row[1] else None
                 composition = str(row[2]).strip() if len(row) > 2 and row[2] else None
                 manufacturer = str(row[3]).strip() if len(row) > 3 and row[3] else None
@@ -364,25 +392,19 @@ async def upload_stock_excel(
                 batch_number = str(row[5]).strip() if len(row) > 5 and row[5] else None
                 package = str(row[6]).strip() if len(row) > 6 and row[6] else None
                 unit = str(row[7]).strip() if len(row) > 7 and row[7] else None
-                # Skip Rack (row[8]) and Section (row[9]) - will be assigned later
                 quantity = int(row[10]) if len(row) > 10 and row[10] else 0
-                # Skip Physical Qty (row[11]) and Discrepancy (row[12])
                 mrp = str(row[13]).strip() if len(row) > 13 and row[13] else None
                 unit_price = float(row[14]) if len(row) > 14 and row[14] else None
                 selling_price = float(row[15]) if len(row) > 15 and row[15] else None
                 
-                # Handle profit margin - cap at 999.99
                 profit_margin = None
                 if len(row) > 16 and row[16]:
                     try:
                         pm = float(row[16])
-                        profit_margin = min(pm, 999.99)  # Cap at database limit
+                        profit_margin = min(pm, 999.99)
                     except:
                         pass
                 
-                # Skip Total Value (row[17])
-                
-                # Handle dates
                 manufacturing_date = None
                 if len(row) > 18 and row[18]:
                     try:
@@ -408,8 +430,10 @@ async def upload_stock_excel(
                     error_count += 1
                     continue
                 
-                # Create stock item (section will be unassigned)
-                db_item = models.StockItem(
+                # Create upload item (not final stock item yet)
+                upload_item = models.ExcelUploadItem(
+                    shop_id=shop_id,
+                    upload_id=upload.id,
                     product_name=product_name,
                     batch_number=batch_number,
                     quantity_software=quantity,
@@ -423,29 +447,468 @@ async def upload_stock_excel(
                     mrp=mrp,
                     unit_price=unit_price,
                     selling_price=selling_price,
-                    profit_margin=profit_margin,
-                    section_id=None,  # Will be unassigned
-                    shop_id=shop_id
+                    profit_margin=profit_margin
                 )
-                db.add(db_item)
+                db.add(upload_item)
                 success_count += 1
                 
             except Exception as e:
                 errors.append(f"Row {row_idx}: {str(e)}")
                 error_count += 1
         
+        upload.total_items = success_count + error_count
+        upload.success_count = success_count
+        upload.error_count = error_count
+        
         db.commit()
         
         return {
-            "message": f"Upload completed: {success_count} items added, {error_count} errors",
+            "upload_id": upload.id,
+            "message": f"Upload created: {success_count} items pending verification, {error_count} errors",
             "success_count": success_count,
             "error_count": error_count,
-            "errors": errors[:10]  # Return first 10 errors
+            "errors": errors[:10],
+            "status": "pending_staff_verification"
         }
         
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to process Excel file: {str(e)}")
+
+# EXCEL UPLOAD VERIFICATION WORKFLOW
+
+@router.get("/uploads")
+def get_excel_uploads(
+    status: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: tuple = Depends(get_current_user)
+):
+    """Get Excel uploads with optional status filter"""
+    staff, shop_id = current_user
+    query = db.query(models.ExcelUpload).filter(models.ExcelUpload.shop_id == shop_id)
+    
+    if status:
+        query = query.filter(models.ExcelUpload.status == status)
+    
+    uploads = query.order_by(models.ExcelUpload.uploaded_at.desc()).all()
+    
+    result = []
+    for upload in uploads:
+        result.append({
+            "id": upload.id,
+            "filename": upload.filename,
+            "uploaded_by": upload.uploaded_by_staff_name,
+            "uploaded_at": upload.uploaded_at,
+            "status": upload.status,
+            "total_items": upload.total_items,
+            "success_count": upload.success_count,
+            "error_count": upload.error_count,
+            "staff_verified": upload.staff_verified,
+            "staff_verified_by": upload.staff_verified_by_name,
+            "staff_verified_at": upload.staff_verified_at,
+            "admin_verified": upload.admin_verified,
+            "admin_verified_by": upload.admin_verified_by_name,
+            "admin_verified_at": upload.admin_verified_at,
+            "upload_notes": upload.upload_notes,
+            "staff_notes": upload.staff_notes,
+            "admin_notes": upload.admin_notes,
+            "rejection_reason": upload.rejection_reason
+        })
+    
+    return result
+
+@router.get("/admin/uploads")
+def get_admin_excel_uploads(
+    status: Optional[str] = None,
+    db: Session = Depends(get_db),
+    admin = Depends(get_current_admin)
+):
+    """Get Excel uploads for admin (all shops)"""
+    query = db.query(models.ExcelUpload)
+    
+    if status:
+        query = query.filter(models.ExcelUpload.status == status)
+    
+    uploads = query.order_by(models.ExcelUpload.uploaded_at.desc()).all()
+
+    
+    result = []
+    for upload in uploads:
+        result.append({
+            "id": upload.id,
+            "filename": upload.filename,
+            "uploaded_by": upload.uploaded_by_staff_name,
+            "uploaded_at": upload.uploaded_at,
+            "status": upload.status,
+            "total_items": upload.total_items,
+            "success_count": upload.success_count,
+            "error_count": upload.error_count,
+            "staff_verified": upload.staff_verified,
+            "staff_verified_by": upload.staff_verified_by_name,
+            "staff_verified_at": upload.staff_verified_at,
+            "admin_verified": upload.admin_verified,
+            "admin_verified_by": upload.admin_verified_by_name,
+            "admin_verified_at": upload.admin_verified_at,
+            "upload_notes": upload.upload_notes,
+            "staff_notes": upload.staff_notes,
+            "admin_notes": upload.admin_notes,
+            "rejection_reason": upload.rejection_reason
+        })
+    
+    return result
+
+@router.get("/uploads/{upload_id}/items")
+def get_upload_items(
+    upload_id: int,
+    db: Session = Depends(get_db),
+    current_user: tuple = Depends(get_current_user)
+):
+    """Get items from specific upload"""
+    staff, shop_id = current_user
+    
+    upload = db.query(models.ExcelUpload).filter(
+        models.ExcelUpload.id == upload_id,
+        models.ExcelUpload.shop_id == shop_id
+    ).first()
+    if not upload:
+        raise HTTPException(status_code=404, detail="Upload not found")
+    
+    items = db.query(models.ExcelUploadItem).filter(
+        models.ExcelUploadItem.upload_id == upload_id
+    ).all()
+    
+    result = []
+    for item in items:
+        result.append({
+            "id": item.id,
+            "product_name": item.product_name,
+            "composition": item.composition,
+            "manufacturer": item.manufacturer,
+            "hsn_code": item.hsn_code,
+            "batch_number": item.batch_number,
+            "package": item.package,
+            "unit": item.unit,
+            "quantity_software": item.quantity_software,
+            "mrp": item.mrp,
+            "unit_price": item.unit_price,
+            "selling_price": item.selling_price,
+            "profit_margin": item.profit_margin,
+            "manufacturing_date": item.manufacturing_date,
+            "expiry_date": item.expiry_date,
+            "section_id": item.section_id,
+            "section_name": item.section.section_name if item.section else None,
+            "rack_name": item.section.rack.rack_number if item.section and item.section.rack else None,
+            "status": item.status,
+            "modified_by_staff": item.modified_by_staff,
+            "modified_by_admin": item.modified_by_admin
+        })
+    
+    return {
+        "upload": {
+            "id": upload.id,
+            "filename": upload.filename,
+            "uploaded_by": upload.uploaded_by_staff_name,
+            "uploaded_at": upload.uploaded_at,
+            "status": upload.status
+        },
+        "items": result
+    }
+
+@router.get("/admin/uploads/{upload_id}/items")
+def get_admin_upload_items(
+    upload_id: int,
+    db: Session = Depends(get_db),
+    admin = Depends(get_current_admin)
+):
+    """Get items from specific upload (admin)"""
+    upload = db.query(models.ExcelUpload).filter(
+        models.ExcelUpload.id == upload_id
+    ).first()
+    if not upload:
+        raise HTTPException(status_code=404, detail="Upload not found")
+    
+    items = db.query(models.ExcelUploadItem).filter(
+        models.ExcelUploadItem.upload_id == upload_id
+    ).all()
+    
+    result = []
+    for item in items:
+        result.append({
+            "id": item.id,
+            "product_name": item.product_name,
+            "composition": item.composition,
+            "manufacturer": item.manufacturer,
+            "hsn_code": item.hsn_code,
+            "batch_number": item.batch_number,
+            "package": item.package,
+            "unit": item.unit,
+            "quantity_software": item.quantity_software,
+            "mrp": item.mrp,
+            "unit_price": item.unit_price,
+            "selling_price": item.selling_price,
+            "profit_margin": item.profit_margin,
+            "manufacturing_date": item.manufacturing_date,
+            "expiry_date": item.expiry_date,
+            "section_id": item.section_id,
+            "section_name": item.section.section_name if item.section else None,
+            "rack_name": item.section.rack.rack_number if item.section and item.section.rack else None,
+            "status": item.status,
+            "modified_by_staff": item.modified_by_staff,
+            "modified_by_admin": item.modified_by_admin
+        })
+    
+    return {
+        "upload": {
+            "id": upload.id,
+            "filename": upload.filename,
+            "uploaded_by": upload.uploaded_by_staff_name,
+            "uploaded_at": upload.uploaded_at,
+            "status": upload.status
+        },
+        "items": result
+    }
+
+@router.put("/uploads/{upload_id}/items/{item_id}")
+def update_upload_item(
+    upload_id: int,
+    item_id: int,
+    item_data: dict,
+    db: Session = Depends(get_db),
+    current_user: tuple = Depends(get_current_user)
+):
+    """Update item in upload (staff/admin can modify)"""
+    staff, shop_id = current_user
+    
+    upload = db.query(models.ExcelUpload).filter(
+        models.ExcelUpload.id == upload_id,
+        models.ExcelUpload.shop_id == shop_id
+    ).first()
+    if not upload:
+        raise HTTPException(status_code=404, detail="Upload not found")
+    
+    item = db.query(models.ExcelUploadItem).filter(
+        models.ExcelUploadItem.id == item_id,
+        models.ExcelUploadItem.upload_id == upload_id
+    ).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Upload item not found")
+    
+    # Update item fields with proper type conversion
+    for key, value in item_data.items():
+        if hasattr(item, key) and key not in ['id', 'upload_id', 'shop_id']:
+            # Handle numeric fields - convert empty strings to None
+            if key in ['unit_price', 'selling_price', 'profit_margin', 'quantity_software', 'section_id']:
+                if value == '' or value is None:
+                    setattr(item, key, None)
+                else:
+                    try:
+                        if key == 'section_id':
+                            setattr(item, key, int(value) if value else None)
+                        elif key == 'quantity_software':
+                            setattr(item, key, int(value) if value else 0)
+                        else:
+                            setattr(item, key, float(value) if value else None)
+                    except (ValueError, TypeError):
+                        setattr(item, key, None)
+            else:
+                setattr(item, key, value)
+    
+    # Mark as modified
+    if upload.status == "pending_staff_verification":
+        item.modified_by_staff = True
+    elif upload.status == "pending_admin_verification":
+        item.modified_by_admin = True
+    
+    db.commit()
+    return {"message": "Item updated successfully"}
+
+@router.delete("/uploads/{upload_id}/items/{item_id}")
+def delete_upload_item(
+    upload_id: int,
+    item_id: int,
+    db: Session = Depends(get_db),
+    current_user: tuple = Depends(get_current_user)
+):
+    """Delete item from upload"""
+    staff, shop_id = current_user
+    
+    upload = db.query(models.ExcelUpload).filter(
+        models.ExcelUpload.id == upload_id,
+        models.ExcelUpload.shop_id == shop_id
+    ).first()
+    if not upload:
+        raise HTTPException(status_code=404, detail="Upload not found")
+    
+    item = db.query(models.ExcelUploadItem).filter(
+        models.ExcelUploadItem.id == item_id,
+        models.ExcelUploadItem.upload_id == upload_id
+    ).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Upload item not found")
+    
+    db.delete(item)
+    upload.success_count -= 1
+    db.commit()
+    return {"message": "Item deleted successfully"}
+
+@router.post("/uploads/{upload_id}/staff-verify")
+def staff_verify_upload(
+    upload_id: int,
+    request_data: dict,
+    db: Session = Depends(get_db),
+    current_user: tuple = Depends(get_current_user)
+):
+    """Staff verification of upload"""
+    staff, shop_id = current_user
+    notes = request_data.get('notes')
+    
+    upload = db.query(models.ExcelUpload).filter(
+        models.ExcelUpload.id == upload_id,
+        models.ExcelUpload.shop_id == shop_id
+    ).first()
+    if not upload:
+        raise HTTPException(status_code=404, detail="Upload not found")
+    
+    # Debug: Check current status
+    print(f"Current upload status: {upload.status}")
+    
+    if upload.status != "pending_staff_verification":
+        raise HTTPException(status_code=400, detail=f"Upload status is '{upload.status}', expected 'pending_staff_verification'")
+    
+    upload.staff_verified = True
+    upload.staff_verified_by_id = staff.id
+    upload.staff_verified_by_name = staff.name
+    upload.staff_verified_at = datetime.now()
+    upload.staff_notes = notes
+    upload.status = "pending_admin_verification"
+    
+    db.commit()
+    return {"message": "Upload verified by staff, sent to admin for final approval"}
+
+@router.post("/uploads/{upload_id}/admin-verify")
+def admin_verify_upload(
+    upload_id: int,
+    request_data: dict,
+    db: Session = Depends(get_db),
+    admin = Depends(get_current_admin)
+):
+    """Admin verification and final approval of upload"""
+    notes = request_data.get('notes')
+    upload = db.query(models.ExcelUpload).filter(
+        models.ExcelUpload.id == upload_id
+    ).first()
+    if not upload:
+        raise HTTPException(status_code=404, detail="Upload not found")
+    
+    if upload.status != "pending_admin_verification":
+        raise HTTPException(status_code=400, detail="Upload not in correct status for admin verification")
+    
+    try:
+        # Create actual stock items from upload items
+        items = db.query(models.ExcelUploadItem).filter(
+            models.ExcelUploadItem.upload_id == upload_id,
+            models.ExcelUploadItem.status == "pending"
+        ).all()
+        
+        created_count = 0
+        for item in items:
+            stock_item = models.StockItem(
+                shop_id=upload.shop_id,
+                product_name=item.product_name,
+                batch_number=item.batch_number,
+                quantity_software=item.quantity_software,
+                composition=item.composition,
+                manufacturer=item.manufacturer,
+                hsn_code=item.hsn_code,
+                package=item.package,
+                unit=item.unit,
+                expiry_date=item.expiry_date,
+                manufacturing_date=item.manufacturing_date,
+                mrp=item.mrp,
+                unit_price=item.unit_price,
+                selling_price=item.selling_price,
+                profit_margin=item.profit_margin,
+                section_id=item.section_id
+            )
+            db.add(stock_item)
+            db.flush()
+            
+            item.stock_item_id = stock_item.id
+            item.status = "approved"
+            created_count += 1
+        
+        upload.admin_verified = True
+        upload.admin_verified_by_id = admin.id
+        upload.admin_verified_by_name = admin.full_name
+        upload.admin_verified_at = datetime.now()
+        upload.admin_notes = notes
+        upload.status = "approved"
+        
+        db.commit()
+        return {
+            "message": f"Upload approved by admin. {created_count} items added to inventory.",
+            "created_count": created_count
+        }
+        
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to approve upload: {str(e)}")
+
+@router.post("/uploads/{upload_id}/reject")
+def reject_upload(
+    upload_id: int,
+    request_data: dict,
+    db: Session = Depends(get_db),
+    current_user: tuple = Depends(get_current_user)
+):
+    """Reject upload (staff or admin)"""
+    staff, shop_id = current_user
+    reason = request_data.get('reason')
+    
+    upload = db.query(models.ExcelUpload).filter(
+        models.ExcelUpload.id == upload_id,
+        models.ExcelUpload.shop_id == shop_id
+    ).first()
+    if not upload:
+        raise HTTPException(status_code=404, detail="Upload not found")
+    
+    upload.status = "rejected"
+    upload.rejection_reason = reason
+    
+    db.commit()
+    return {"message": "Upload rejected"}
+
+@router.delete("/uploads/{upload_id}")
+def delete_upload(
+    upload_id: int,
+    db: Session = Depends(get_db),
+    admin = Depends(get_current_admin)
+):
+    """Delete upload and associated data (admin only)"""
+    upload = db.query(models.ExcelUpload).filter(
+        models.ExcelUpload.id == upload_id
+    ).first()
+    if not upload:
+        raise HTTPException(status_code=404, detail="Upload not found")
+    
+    # If approved, also delete created stock items
+    if upload.status == "approved":
+        items = db.query(models.ExcelUploadItem).filter(
+            models.ExcelUploadItem.upload_id == upload_id,
+            models.ExcelUploadItem.stock_item_id.isnot(None)
+        ).all()
+        
+        for item in items:
+            if item.stock_item_id:
+                stock_item = db.query(models.StockItem).filter(
+                    models.StockItem.id == item.stock_item_id
+                ).first()
+                if stock_item:
+                    db.delete(stock_item)
+    
+    db.delete(upload)
+    db.commit()
+    return {"message": "Upload and associated data deleted successfully"}
 
 @router.get("/items/unassigned/list", response_model=List[schemas.StockItem])
 def get_unassigned_items(
