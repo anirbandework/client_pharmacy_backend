@@ -11,8 +11,8 @@ class InvoiceStockSyncService:
     @staticmethod
     def sync_invoice_to_stock(db: Session, invoice_id: int, shop_id: int) -> dict:
         """Sync verified invoice items to stock audit system"""
-        from modules.invoice_analyzer.models import PurchaseInvoice, PurchaseInvoiceItem
-        from modules.stock_audit.models import StockItem
+        from modules.invoice_analyzer_v2.models import PurchaseInvoice, PurchaseInvoiceItem
+        from modules.stock_audit_v2.models import StockItem
         
         # Get invoice
         invoice = db.query(PurchaseInvoice).filter(

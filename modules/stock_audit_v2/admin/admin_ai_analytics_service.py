@@ -71,7 +71,7 @@ class StockAuditAIAnalytics:
         shop_id: int = None
     ) -> Dict[str, Any]:
         """Gather comprehensive stock audit data for analysis"""
-        from modules.stock_audit.models import StockItem, StockAuditRecord, StockAdjustment
+        from modules.stock_audit_v2.models import StockItem, StockAuditRecord, StockAdjustment
         from modules.auth.models import Shop
         
         # Base query

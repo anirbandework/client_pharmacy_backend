@@ -332,7 +332,7 @@ def get_invoice_admin(invoice_id: int, db: Session = Depends(get_db), current_ad
 def admin_update_distributor_invoice(invoice_id: int, invoice_data: DistributorInvoiceCreate, db: Session = Depends(get_db), current_admin = Depends(get_current_admin)):
     """Admin updates distributor invoice and re-syncs to stock"""
     from modules.auth.models import Shop
-    from modules.stock_audit.models import StockItem
+    from modules.stock_audit_v2.models import StockItem
     import logging
     logger = logging.getLogger(__name__)
     
@@ -490,7 +490,7 @@ def get_invoice(invoice_id: int, db: Session = Depends(get_db), current_staff = 
 def admin_verify(invoice_id: int, db: Session = Depends(get_db), current_admin = Depends(get_current_admin)):
     """Admin verifies distributor invoice and syncs to stock"""
     from modules.auth.models import Shop
-    from modules.stock_audit.models import StockItem
+    from modules.stock_audit_v2.models import StockItem
     import logging
     logger = logging.getLogger(__name__)
     

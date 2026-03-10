@@ -79,7 +79,7 @@ class InvoiceAIAnalytics:
         end_date: date = None
     ) -> Dict[str, Any]:
         """Gather comprehensive invoice data for analysis"""
-        from modules.invoice_analyzer.models import PurchaseInvoice, PurchaseInvoiceItem
+        from modules.invoice_analyzer_v2.models import PurchaseInvoice, PurchaseInvoiceItem
         from modules.auth.models import Shop
         
         # Base query

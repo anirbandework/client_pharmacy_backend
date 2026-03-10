@@ -16,7 +16,7 @@ class DashboardAnalytics:
         end_date: date = None
     ) -> Dict[str, Any]:
         """Get all analytics data for dashboard charts (VERIFIED INVOICES ONLY)"""
-        from .models import PurchaseInvoice, PurchaseInvoiceItem
+        from modules.invoice_analyzer_v2.models import PurchaseInvoice, PurchaseInvoiceItem
         from modules.auth.models import Shop
         
         # Base query - ONLY ADMIN-VERIFIED INVOICES

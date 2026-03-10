@@ -11,12 +11,10 @@ class StockCalculationService:
     def calculate_software_stock(db: Session, stock_item_id: int) -> int:
         """Calculate software stock based on purchases and sales"""
         
-        # Get total purchases
         total_purchased = db.query(func.sum(PurchaseItem.quantity)).filter(
             PurchaseItem.stock_item_id == stock_item_id
         ).scalar() or 0
         
-        # Get total sales
         total_sold = db.query(func.sum(SaleItem.quantity)).filter(
             SaleItem.stock_item_id == stock_item_id
         ).scalar() or 0

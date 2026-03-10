@@ -14,7 +14,7 @@ class StockAuditAnalytics:
         shop_id: int = None
     ) -> Dict[str, Any]:
         """Get all analytics data for stock audit dashboard"""
-        from modules.stock_audit.models import StockItem, StockAuditRecord, StockAdjustment, Purchase, Sale
+        from modules.stock_audit_v2.models import StockItem, StockAuditRecord, StockAdjustment, Purchase, Sale
         from modules.auth.models import Shop
         
         # Base query for stock items
@@ -180,7 +180,7 @@ class StockAuditAnalytics:
     @staticmethod
     def _get_audit_performance(db: Session, organization_id: str, shop_id: int = None) -> Dict[str, Any]:
         """Analyze audit performance over time"""
-        from modules.stock_audit.models import StockAuditRecord
+        from modules.stock_audit_v2.models import StockAuditRecord
         from modules.auth.models import Shop
         
         query = db.query(StockAuditRecord).join(Shop).filter(
@@ -215,7 +215,7 @@ class StockAuditAnalytics:
     @staticmethod
     def _get_stock_movement(db: Session, organization_id: str, shop_id: int = None) -> Dict[str, Any]:
         """Analyze stock movement (purchases vs sales)"""
-        from modules.stock_audit.models import Purchase, Sale
+        from modules.stock_audit_v2.models import Purchase, Sale
         from modules.auth.models import Shop
         
         # Last 30 days
@@ -252,7 +252,7 @@ class StockAuditAnalytics:
     @staticmethod
     def _get_adjustment_analysis(db: Session, organization_id: str, shop_id: int = None) -> Dict[str, Any]:
         """Analyze stock adjustments"""
-        from modules.stock_audit.models import StockAdjustment
+        from modules.stock_audit_v2.models import StockAdjustment
         from modules.auth.models import Shop
         
         query = db.query(StockAdjustment).join(Shop).filter(

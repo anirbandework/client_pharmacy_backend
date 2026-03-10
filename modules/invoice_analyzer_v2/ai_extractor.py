@@ -235,7 +235,7 @@ Invoice:
         
         try:
             response = self.client.models.generate_content(
-                model='gemini-1.5-flash',
+                model='gemini-2.0-flash',
                 contents=prompt
             )
             result_text = response.text.strip()

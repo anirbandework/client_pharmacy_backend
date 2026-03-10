@@ -145,7 +145,7 @@ def delete_bill(
         raise HTTPException(status_code=404, detail="Bill not found")
     
     # Restore stock quantities and recalculate discrepancy
-    from modules.stock_audit.models import StockItem
+    from modules.stock_audit_v2.models import StockItem
     for item in bill.items:
         stock_item = db.query(StockItem).filter(
             StockItem.id == item.stock_item_id,

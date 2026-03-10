@@ -4,16 +4,12 @@ from sqlalchemy.orm import Session
 from app.database.database import get_db
 from datetime import datetime, date, timedelta
 from typing import Optional, List
-from . import schemas, models, services
-from .ai_service import StockAuditAIService
-from .admin_analytics import StockAuditAnalytics
-from .admin_ai_analytics import StockAuditAIAnalytics
-from .dependencies import get_current_user_with_geofence as get_current_user
-from modules.auth.dependencies import get_current_admin
+from .. import schemas, models, services
+from .staff_ai_service import StockAuditAIService
+from .staff_dependencies import get_current_staff_with_geofence as get_current_user
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from io import BytesIO
-from app.utils.cache import dashboard_cache
 
 router = APIRouter()
 
@@ -48,14 +44,6 @@ def get_racks(
     """Get all store racks"""
     staff, shop_id = current_user
     return db.query(models.StockRack).filter(models.StockRack.shop_id == shop_id).all()
-
-@router.get("/admin/racks", response_model=List[schemas.StoreRack])
-def get_admin_racks(
-    db: Session = Depends(get_db),
-    admin = Depends(get_current_admin)
-):
-    """Get all store racks for admin (all shops)"""
-    return db.query(models.StockRack).all()
 
 @router.put("/racks/{rack_id}", response_model=schemas.StoreRack)
 def update_rack(
@@ -129,18 +117,6 @@ def get_sections(
     """Get all sections, optionally filtered by rack"""
     staff, shop_id = current_user
     query = db.query(models.StockSection).filter(models.StockSection.shop_id == shop_id)
-    if rack_id:
-        query = query.filter(models.StockSection.rack_id == rack_id)
-    return query.all()
-
-@router.get("/admin/sections", response_model=List[schemas.StoreSection])
-def get_admin_sections(
-    rack_id: Optional[int] = None,
-    db: Session = Depends(get_db),
-    admin = Depends(get_current_admin)
-):
-    """Get all sections for admin (all shops)"""
-    query = db.query(models.StockSection)
     if rack_id:
         query = query.filter(models.StockSection.rack_id == rack_id)
     return query.all()
@@ -517,46 +493,6 @@ def get_excel_uploads(
     
     return result
 
-@router.get("/admin/uploads")
-def get_admin_excel_uploads(
-    status: Optional[str] = None,
-    db: Session = Depends(get_db),
-    admin = Depends(get_current_admin)
-):
-    """Get Excel uploads for admin (all shops)"""
-    query = db.query(models.ExcelUpload)
-    
-    if status:
-        query = query.filter(models.ExcelUpload.status == status)
-    
-    uploads = query.order_by(models.ExcelUpload.uploaded_at.desc()).all()
-
-    
-    result = []
-    for upload in uploads:
-        result.append({
-            "id": upload.id,
-            "filename": upload.filename,
-            "uploaded_by": upload.uploaded_by_staff_name,
-            "uploaded_at": upload.uploaded_at,
-            "status": upload.status,
-            "total_items": upload.total_items,
-            "success_count": upload.success_count,
-            "error_count": upload.error_count,
-            "staff_verified": upload.staff_verified,
-            "staff_verified_by": upload.staff_verified_by_name,
-            "staff_verified_at": upload.staff_verified_at,
-            "admin_verified": upload.admin_verified,
-            "admin_verified_by": upload.admin_verified_by_name,
-            "admin_verified_at": upload.admin_verified_at,
-            "upload_notes": upload.upload_notes,
-            "staff_notes": upload.staff_notes,
-            "admin_notes": upload.admin_notes,
-            "rejection_reason": upload.rejection_reason
-        })
-    
-    return result
-
 @router.get("/uploads/{upload_id}/items")
 def get_upload_items(
     upload_id: int,
@@ -569,60 +505,6 @@ def get_upload_items(
     upload = db.query(models.ExcelUpload).filter(
         models.ExcelUpload.id == upload_id,
         models.ExcelUpload.shop_id == shop_id
-    ).first()
-    if not upload:
-        raise HTTPException(status_code=404, detail="Upload not found")
-    
-    items = db.query(models.ExcelUploadItem).filter(
-        models.ExcelUploadItem.upload_id == upload_id
-    ).all()
-    
-    result = []
-    for item in items:
-        result.append({
-            "id": item.id,
-            "product_name": item.product_name,
-            "composition": item.composition,
-            "manufacturer": item.manufacturer,
-            "hsn_code": item.hsn_code,
-            "batch_number": item.batch_number,
-            "package": item.package,
-            "unit": item.unit,
-            "quantity_software": item.quantity_software,
-            "mrp": item.mrp,
-            "unit_price": item.unit_price,
-            "selling_price": item.selling_price,
-            "profit_margin": item.profit_margin,
-            "manufacturing_date": item.manufacturing_date,
-            "expiry_date": item.expiry_date,
-            "section_id": item.section_id,
-            "section_name": item.section.section_name if item.section else None,
-            "rack_name": item.section.rack.rack_number if item.section and item.section.rack else None,
-            "status": item.status,
-            "modified_by_staff": item.modified_by_staff,
-            "modified_by_admin": item.modified_by_admin
-        })
-    
-    return {
-        "upload": {
-            "id": upload.id,
-            "filename": upload.filename,
-            "uploaded_by": upload.uploaded_by_staff_name,
-            "uploaded_at": upload.uploaded_at,
-            "status": upload.status
-        },
-        "items": result
-    }
-
-@router.get("/admin/uploads/{upload_id}/items")
-def get_admin_upload_items(
-    upload_id: int,
-    db: Session = Depends(get_db),
-    admin = Depends(get_current_admin)
-):
-    """Get items from specific upload (admin)"""
-    upload = db.query(models.ExcelUpload).filter(
-        models.ExcelUpload.id == upload_id
     ).first()
     if not upload:
         raise HTTPException(status_code=404, detail="Upload not found")
@@ -790,12 +672,14 @@ def admin_verify_upload(
     upload_id: int,
     request_data: dict,
     db: Session = Depends(get_db),
-    admin = Depends(get_current_admin)
+    current_user: tuple = Depends(get_current_user)
 ):
     """Admin verification and final approval of upload"""
+    staff, shop_id = current_user
     notes = request_data.get('notes')
     upload = db.query(models.ExcelUpload).filter(
-        models.ExcelUpload.id == upload_id
+        models.ExcelUpload.id == upload_id,
+        models.ExcelUpload.shop_id == shop_id
     ).first()
     if not upload:
         raise HTTPException(status_code=404, detail="Upload not found")
@@ -838,8 +722,8 @@ def admin_verify_upload(
             created_count += 1
         
         upload.admin_verified = True
-        upload.admin_verified_by_id = admin.id
-        upload.admin_verified_by_name = admin.full_name
+        upload.admin_verified_by_id = staff.id
+        upload.admin_verified_by_name = staff.name
         upload.admin_verified_at = datetime.now()
         upload.admin_notes = notes
         upload.status = "approved"
@@ -882,11 +766,13 @@ def reject_upload(
 def delete_upload(
     upload_id: int,
     db: Session = Depends(get_db),
-    admin = Depends(get_current_admin)
+    current_user: tuple = Depends(get_current_user)
 ):
-    """Delete upload and associated data (admin only)"""
+    """Delete upload and associated data"""
+    staff, shop_id = current_user
     upload = db.query(models.ExcelUpload).filter(
-        models.ExcelUpload.id == upload_id
+        models.ExcelUpload.id == upload_id,
+        models.ExcelUpload.shop_id == shop_id
     ).first()
     if not upload:
         raise HTTPException(status_code=404, detail="Upload not found")
@@ -1384,53 +1270,6 @@ def get_stock_adjustments(
     return query.order_by(models.StockAdjustment.adjustment_date.desc()).offset(skip).limit(limit).all()
 
 # AI ANALYTICS
-
-@router.get("/admin/analytics/dashboard")
-def get_admin_dashboard_analytics(
-    shop_id: Optional[int] = Query(None),
-    db: Session = Depends(get_db),
-    admin = Depends(get_current_admin)
-):
-    """Get comprehensive stock audit analytics for admin dashboard"""
-    cache_key = f"stock_audit_dashboard:{admin.organization_id}:{shop_id or 'all'}"
-    cached = dashboard_cache.get(cache_key)
-    if cached is not None:
-        return cached
-    
-    try:
-        result = StockAuditAnalytics.get_comprehensive_analytics(
-            db=db,
-            organization_id=admin.organization_id,
-            shop_id=shop_id
-        )
-        dashboard_cache.set(cache_key, result, ttl=60)
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.get("/admin/analytics/ai-insights")
-def get_admin_ai_insights(
-    shop_id: Optional[int] = Query(None),
-    db: Session = Depends(get_db),
-    admin = Depends(get_current_admin)
-):
-    """Get AI-generated insights for admin (organization-wide or specific shop)"""
-    cache_key = f"stock_audit_ai:{admin.organization_id}:{shop_id or 'all'}"
-    cached = dashboard_cache.get(cache_key)
-    if cached is not None:
-        return cached
-    
-    try:
-        ai_service = StockAuditAIAnalytics()
-        result = ai_service.generate_comprehensive_analysis(
-            db=db,
-            organization_id=admin.organization_id,
-            shop_id=shop_id
-        )
-        dashboard_cache.set(cache_key, result, ttl=3600)
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/ai-analytics/comprehensive")
 def get_comprehensive_ai_analysis(

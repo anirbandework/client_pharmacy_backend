@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, or_
 from .models import Bill, BillItem
-from modules.stock_audit.models import StockItem, StockSection, StockRack
+from modules.stock_audit_v2.models import StockItem, StockSection, StockRack
 from modules.customer_tracking.services import CustomerTrackingService
 from modules.customer_tracking.models import Customer
 from datetime import datetime, date, timedelta
