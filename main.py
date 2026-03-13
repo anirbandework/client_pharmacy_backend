@@ -12,15 +12,10 @@ from datetime import datetime
 load_dotenv()
 
 from modules.customer_tracking.routes import router as customer_router
-from modules.invoice_analyzer.routes import router as invoice_router
-from modules.invoice_analyzer.template_routes import router as invoice_template_router
-from modules.invoice_analyzer.admin_analytics_routes import router as invoice_admin_analytics_router
-from modules.invoice_analyzer.admin_routes import router as invoice_admin_router
-from modules.invoice_analyzer.public_routes import router as invoice_public_router
-from modules.invoice_analyzer.autocomplete_routes import router as invoice_autocomplete_router
-from modules.invoice_analyzer.margin_playground_routes import router as invoice_analytics_router
-from modules.invoice_analyzer.pricing_routes import router as invoice_pricing_router
-from modules.stock_audit.routes import router as stock_router
+from modules.invoice_analyzer_v2.staff.staff_routes import router as invoice_staff_router
+from modules.invoice_analyzer_v2.admin.admin_routes import router as invoice_admin_router
+from modules.stock_audit_v2.staff.staff_routes import router as stock_staff_router
+from modules.stock_audit_v2.admin.admin_routes import router as stock_admin_router
 from modules.profit_analysis.routes import router as profit_router
 from modules.auth.routes import router as auth_router
 from modules.auth.distributor.routes import router as distributor_router
@@ -30,12 +25,8 @@ from modules.auth.attendance.routes import router as attendance_router
 from modules.auth.rbac.routes import router as rbac_router
 from modules.notifications.routes import router as notifications_router
 from modules.feedback.routes import router as feedback_router
-from modules.billing.routes import router as billing_router
-from modules.billing.daily_records_routes import router as billing_daily_records_router
-from modules.billing.analytics_routes import router as billing_analytics_router
-from modules.billing.shop_config_routes import router as shop_config_router
-from modules.billing.admin_config_routes import router as admin_config_router
-from modules.billing.admin_analytics_routes import router as billing_admin_analytics_router
+from modules.billing_v2.staff.staff_routes import router as billing_staff_router
+from modules.billing_v2.admin.admin_routes import router as billing_admin_router
 from modules.auth.middleware import ShopContextMiddleware
 from modules.auth.attendance.wifi_middleware import WiFiEnforcementMiddleware
 from modules.auth.attendance.scheduler import start_scheduler, shutdown_scheduler
@@ -46,9 +37,9 @@ from modules.customer_tracking.models import (
     ContactRecord, ContactInteraction, ContactReminder,
     Customer, CustomerPurchase, RefillReminder
 )
-from modules.stock_audit.models import *
-from modules.billing.models import Bill, BillItem
-from modules.billing.daily_records_models import DailyRecord as BillingDailyRecord, DailyExpense
+from modules.stock_audit_v2.models import *
+from modules.billing_v2.models import Bill, BillItem
+from modules.billing_v2.daily_records_models import DailyRecord as BillingDailyRecord, DailyExpense
 from modules.auth.models import Admin, Shop, Staff
 from modules.auth.otp.models import OTPVerification
 from modules.auth.salary_management.models import SalaryRecord, StaffPaymentInfo, SalaryAlert
@@ -59,7 +50,7 @@ from modules.auth.attendance.models import (
 from modules.notifications.models import (
     Notification, NotificationShopTarget, NotificationStaffTarget, NotificationRead
 )
-from modules.invoice_analyzer.models import PurchaseInvoice, PurchaseInvoiceItem
+from modules.invoice_analyzer_v2.models import PurchaseInvoice, PurchaseInvoiceItem
 from modules.distributor_invoice.models import DistributorInvoice, DistributorInvoiceItem
 from modules.feedback.models import Feedback
 from modules.auth.rbac.models import Module, OrganizationModulePermission
@@ -172,25 +163,28 @@ app.include_router(attendance_router, prefix="/api/attendance", tags=["Attendanc
 app.include_router(notifications_router, prefix="/api/notifications", tags=["Notifications"])
 app.include_router(feedback_router, prefix="/api/feedback", tags=["Feedback System"])
 app.include_router(customer_router, prefix="/api/customer-tracking", tags=["Customer Tracking"])
-app.include_router(invoice_public_router, prefix="/api/purchase-invoices", tags=["Purchase Invoice - Public"])
-app.include_router(invoice_template_router, prefix="/api/purchase-invoices", tags=["Purchase Invoice Analyzer"])
-app.include_router(invoice_admin_analytics_router, prefix="/api/purchase-invoices", tags=["Purchase Invoice Analytics - Admin"])
-app.include_router(invoice_admin_router, prefix="/api/purchase-invoices", tags=["Purchase Invoice - Admin Verification"])
-app.include_router(invoice_autocomplete_router, prefix="/api/purchase-invoices", tags=["Purchase Invoice Autocomplete"])
-app.include_router(invoice_pricing_router, prefix="/api/purchase-invoices", tags=["Purchase Invoice Pricing"])
-app.include_router(invoice_analytics_router, prefix="/api/purchase-invoices", tags=["Purchase Invoice Analytics"])
-app.include_router(invoice_router, prefix="/api/purchase-invoices", tags=["Purchase Invoice Analyzer"])
-app.include_router(stock_router, prefix="/api/stock-audit", tags=["Stock Audit"])
-app.include_router(billing_router, prefix="/api/billing", tags=["Billing System"])
-app.include_router(billing_daily_records_router, prefix="/api/billing", tags=["Daily Records"])
-app.include_router(billing_analytics_router, prefix="/api/billing", tags=["Analytics"])
-app.include_router(shop_config_router, prefix="/api/billing", tags=["Shop Config"])
-app.include_router(admin_config_router, prefix="/api/billing", tags=["Admin Config"])
-app.include_router(billing_admin_analytics_router, prefix="/api/billing", tags=["Admin Analytics"])
+app.include_router(invoice_admin_router, prefix="/api/purchase-invoices", tags=["Purchase Invoice - Admin"])
+app.include_router(invoice_staff_router, prefix="/api/purchase-invoices", tags=["Purchase Invoice - Staff"])
+app.include_router(stock_staff_router, prefix="/api/stock-audit/staff", tags=["Stock Audit - Staff"])
+app.include_router(stock_admin_router, prefix="/api/stock-audit/admin", tags=["Stock Audit - Admin"])
+app.include_router(billing_staff_router, prefix="/api/billing", tags=["Billing"])
+app.include_router(billing_admin_router, prefix="/api/billing", tags=["Billing Admin"])
 app.include_router(profit_router, prefix="/api/profit", tags=["Profit Analysis"])
 
 # Start attendance scheduler for stale session detection
 start_scheduler()
+
+# Gemini API health check on startup
+import logging
+_startup_logger = logging.getLogger("startup")
+_gemini_api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+if _gemini_api_key:
+    _startup_logger.info("✅ GEMINI_API_KEY found - AI invoice extraction enabled")
+else:
+    _startup_logger.warning(
+        "⚠️  GEMINI_API_KEY not set - invoice extraction will use regex fallback only. "
+        "Set GEMINI_API_KEY in .env to enable AI-powered extraction."
+    )
 
 # Mount static files for uploads
 os.makedirs("uploads/qr_codes", exist_ok=True)
@@ -206,7 +200,12 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "modules": ["auth", "rbac", "salary_management", "attendance", "notifications", "feedback", "customer_tracking", "purchase_invoice_analyzer", "stock_audit", "billing", "profit_analysis"]}
+    gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    return {
+        "status": "healthy",
+        "modules": ["auth", "rbac", "salary_management", "attendance", "notifications", "feedback", "customer_tracking", "purchase_invoice_analyzer", "stock_audit", "billing", "profit_analysis"],
+        "ai_extraction": "enabled" if gemini_key else "disabled (fallback only - set GEMINI_API_KEY)"
+    }
 
 @app.get("/modules")
 async def list_modules():
