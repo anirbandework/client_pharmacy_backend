@@ -329,17 +329,19 @@ Invoice:
                 break
         
         # Extract invoice number
-        inv_match = re.search(r'Invoice No\s*:\s*([A-Z0-9/-]+)', text, re.IGNORECASE)
-        if inv_match:
-            inv_num = inv_match.group(1).strip()
-            # Check if there's a continuation on next line
-            inv_idx = text.find(inv_match.group(0))
-            if inv_idx > 0:
-                remaining = text[inv_idx:inv_idx+200]
-                next_line_match = re.search(r'Invoice No\s*:\s*([A-Z0-9/-]+)\s*\.?\s*(\d+)', remaining, re.IGNORECASE)
-                if next_line_match and next_line_match.group(2):
-                    inv_num = inv_match.group(1) + next_line_match.group(2)
-            data["invoice_number"] = inv_num
+        # Strategy: find the label, then grab up to 60 chars with newlines collapsed,
+        # so numbers split across lines (e.g. "GMPL/TR/25-\n26/SW000217") are joined correctly.
+        inv_label_match = re.search(
+            r'(?:Invoice\s*No\.?|Invoice\s*Number|Inv\.?\s*No\.?)\s*[:#]\s*',
+            text, re.IGNORECASE
+        )
+        if inv_label_match:
+            after_label = text[inv_label_match.end():inv_label_match.end() + 80]
+            # Collapse newlines so a number broken across lines becomes one token
+            after_label_flat = re.sub(r'\s*\n\s*', '', after_label)
+            num_match = re.match(r'([A-Z0-9][A-Z0-9/.\-]+)', after_label_flat, re.IGNORECASE)
+            if num_match:
+                data["invoice_number"] = num_match.group(1).strip()
         
         # Extract dates
         date_matches = re.findall(r'Date\s*:\s*(\d{2}/\d{2}/\d{4})', text)

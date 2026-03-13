@@ -38,4 +38,11 @@ class SimpleCache:
             self._cache.clear()
             self._timestamps.clear()
 
+    def clear_prefix(self, prefix: str):
+        """Clear all keys that start with the given prefix"""
+        keys_to_delete = [k for k in self._cache if k.startswith(prefix)]
+        for k in keys_to_delete:
+            self._cache.pop(k, None)
+            self._timestamps.pop(k, None)
+
 dashboard_cache = SimpleCache()

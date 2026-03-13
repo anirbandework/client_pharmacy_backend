@@ -1,8 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from app.database.database import get_db
 from modules.auth.dependencies import get_current_admin
 from modules.auth.models import Admin
+from modules.invoice_analyzer_v2 import schemas
+from typing import Optional
 from datetime import datetime
 import logging
 
@@ -42,7 +44,17 @@ def admin_verify_invoice(
     invoice.updated_at = datetime.now()
     
     db.commit()
-    
+
+    logger.info(
+        f"AUDIT | action=admin_verify | invoice_id={invoice_id} | "
+        f"admin_id={admin.id} | org_id={admin.organization_id} | at={datetime.now()}"
+    )
+
+    # Invalidate dashboard cache so analytics reflect new verified invoice
+    from app.utils.cache import dashboard_cache
+    dashboard_cache.clear_prefix(f"dashboard:{admin.organization_id}")
+    dashboard_cache.clear_prefix(f"ai_analytics:{admin.organization_id}")
+
     # Now sync to stock
     try:
         from modules.stock_audit_v2.sync_service import InvoiceStockSyncService
@@ -89,112 +101,116 @@ def admin_reject_invoice(
     invoice.updated_at = datetime.now()
     
     db.commit()
-    
+
+    logger.info(
+        f"AUDIT | action=admin_reject | invoice_id={invoice_id} | "
+        f"admin_id={admin.id} | org_id={admin.organization_id} | at={datetime.now()}"
+    )
+
+    # Invalidate dashboard cache
+    from app.utils.cache import dashboard_cache
+    dashboard_cache.clear_prefix(f"dashboard:{admin.organization_id}")
+
     return {"message": "Invoice rejected and sent back to staff"}
 
 @router.put("/{invoice_id}/admin-update")
 def admin_update_invoice(
     invoice_id: int,
-    invoice_data: dict,
+    invoice_data: schemas.PurchaseInvoiceUpdate,
     db: Session = Depends(get_db),
     admin: Admin = Depends(get_current_admin)
 ):
     """Admin updates invoice before verification"""
     from modules.invoice_analyzer_v2 import models
     from modules.auth.models import Shop
-    
+
     invoice = db.query(models.PurchaseInvoice).join(Shop).filter(
         models.PurchaseInvoice.id == invoice_id,
         Shop.organization_id == admin.organization_id
     ).first()
-    
+
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
-    
-    # Allow editing even if verified
-    
-    # Parse dates
-    def parse_date(date_obj):
-        if isinstance(date_obj, str):
-            try:
-                from datetime import datetime as dt
-                return dt.strptime(date_obj, "%Y-%m-%d").date()
-            except:
-                return None
-        return date_obj
-    
-    # Update invoice fields
-    invoice.invoice_number = invoice_data['invoice_number']
-    invoice.invoice_date = parse_date(invoice_data['invoice_date'])
-    invoice.due_date = parse_date(invoice_data.get('due_date')) if invoice_data.get('due_date') else None
-    invoice.supplier_name = invoice_data['supplier_name']
-    invoice.supplier_address = invoice_data.get('supplier_address')
-    invoice.supplier_gstin = invoice_data.get('supplier_gstin')
-    invoice.supplier_dl_numbers = invoice_data.get('supplier_dl_numbers')
-    invoice.supplier_phone = invoice_data.get('supplier_phone')
-    invoice.gross_amount = invoice_data['gross_amount']
-    invoice.discount_amount = invoice_data.get('discount_amount', 0)
-    invoice.taxable_amount = invoice_data['taxable_amount']
-    invoice.total_gst = invoice_data['total_gst']
-    invoice.round_off = invoice_data.get('round_off', 0)
-    invoice.net_amount = invoice_data['net_amount']
-    invoice.custom_fields = invoice_data.get('custom_fields', {})
+
+    # Update invoice fields (Pydantic already validated and parsed dates)
+    invoice.invoice_number = invoice_data.invoice_number
+    invoice.invoice_date = invoice_data.invoice_date
+    invoice.due_date = invoice_data.due_date
+    invoice.supplier_name = invoice_data.supplier_name
+    invoice.supplier_address = invoice_data.supplier_address
+    invoice.supplier_gstin = invoice_data.supplier_gstin
+    invoice.supplier_dl_numbers = invoice_data.supplier_dl_numbers
+    invoice.supplier_phone = invoice_data.supplier_phone
+    invoice.gross_amount = invoice_data.gross_amount
+    invoice.discount_amount = invoice_data.discount_amount
+    invoice.taxable_amount = invoice_data.taxable_amount
+    invoice.total_gst = invoice_data.total_gst
+    invoice.round_off = invoice_data.round_off
+    invoice.net_amount = invoice_data.net_amount
+    invoice.custom_fields = invoice_data.custom_fields or {}
     invoice.updated_at = datetime.now()
-    
+
+    logger.info(
+        f"AUDIT | action=admin_update | invoice_id={invoice_id} | "
+        f"admin_id={admin.id} | org_id={admin.organization_id} | at={datetime.now()}"
+    )
+
     # Delete existing items
     db.query(models.PurchaseInvoiceItem).filter(
         models.PurchaseInvoiceItem.invoice_id == invoice_id
     ).delete()
-    
+
     # Truncate string fields to prevent database errors
     def truncate_str(value, max_length=255):
         if value is None:
             return None
         return str(value)[:max_length] if len(str(value)) > max_length else str(value)
-    
+
     # Add updated items
-    for item_data in invoice_data['items']:
-        expiry_date = parse_date(item_data.get('expiry_date')) if item_data.get('expiry_date') else None
-        manufacturing_date = parse_date(item_data.get('manufacturing_date')) if item_data.get('manufacturing_date') else None
-        
+    for item_data in invoice_data.items:
         item = models.PurchaseInvoiceItem(
             invoice_id=invoice.id,
             shop_id=invoice.shop_id,
-            composition=truncate_str(item_data.get('composition')),
-            manufacturer=truncate_str(item_data.get('manufacturer')),
-            hsn_code=truncate_str(item_data.get('hsn_code')),
-            product_name=truncate_str(item_data.get('product_name') or "Unknown Product"),
-            batch_number=truncate_str(item_data.get('batch_number')),
-            quantity=item_data['quantity'],
-            free_quantity=item_data.get('free_quantity', 0),
-            package=truncate_str(item_data.get('package')),
-            unit=truncate_str(item_data.get('unit')),
-            manufacturing_date=manufacturing_date,
-            expiry_date=expiry_date,
-            mrp=truncate_str(item_data.get('mrp')),
-            unit_price=item_data['unit_price'],
-            selling_price=item_data.get('selling_price', 0),
-            profit_margin=item_data.get('profit_margin', 0),
-            discount_on_purchase=item_data.get('discount_on_purchase', 0),
-            discount_on_sales=item_data.get('discount_on_sales', 0),
-            discount_percent=item_data.get('discount_percent', 0),
-            discount_amount=item_data.get('discount_amount', 0),
-            before_discount=item_data.get('before_discount', 0),
-            taxable_amount=item_data['taxable_amount'],
-            cgst_percent=item_data.get('cgst_percent', 0),
-            cgst_amount=item_data.get('cgst_amount', 0),
-            sgst_percent=item_data.get('sgst_percent', 0),
-            sgst_amount=item_data.get('sgst_amount', 0),
-            igst_percent=item_data.get('igst_percent', 0),
-            igst_amount=item_data.get('igst_amount', 0),
-            total_amount=item_data['total_amount'],
-            custom_fields=item_data.get('custom_fields', {})
+            composition=truncate_str(item_data.composition),
+            manufacturer=truncate_str(item_data.manufacturer),
+            hsn_code=truncate_str(item_data.hsn_code),
+            product_name=truncate_str(item_data.product_name or "Unknown Product"),
+            batch_number=truncate_str(item_data.batch_number),
+            quantity=item_data.quantity,
+            free_quantity=item_data.free_quantity,
+            package=truncate_str(item_data.package),
+            unit=truncate_str(item_data.unit),
+            manufacturing_date=item_data.manufacturing_date,
+            expiry_date=item_data.expiry_date,
+            mrp=truncate_str(item_data.mrp),
+            unit_price=item_data.unit_price,
+            selling_price=item_data.selling_price,
+            profit_margin=item_data.profit_margin,
+            discount_on_purchase=item_data.discount_on_purchase,
+            discount_on_sales=item_data.discount_on_sales,
+            discount_percent=item_data.discount_percent,
+            discount_amount=item_data.discount_amount,
+            before_discount=item_data.before_discount,
+            taxable_amount=item_data.taxable_amount,
+            cgst_percent=item_data.cgst_percent,
+            cgst_amount=item_data.cgst_amount,
+            sgst_percent=item_data.sgst_percent,
+            sgst_amount=item_data.sgst_amount,
+            igst_percent=item_data.igst_percent,
+            igst_amount=item_data.igst_amount,
+            total_amount=item_data.total_amount,
+            custom_fields=item_data.custom_fields or {}
         )
         db.add(item)
-    
+
     db.commit()
     db.refresh(invoice)
-    
+
+    # Invalidate dashboard cache for this organization
+    from app.utils.cache import dashboard_cache
+    dashboard_cache.clear_prefix(f"dashboard:{admin.organization_id}")
+    dashboard_cache.clear_prefix(f"ai_analytics:{admin.organization_id}")
+
     return {"message": "Invoice updated successfully"}
 
 @router.delete("/{invoice_id}/admin-delete")
@@ -206,77 +222,27 @@ def admin_delete_invoice(
     """Admin deletes invoice and reverses stock"""
     from modules.invoice_analyzer_v2 import models
     from modules.auth.models import Shop
-    import logging
-    logger = logging.getLogger(__name__)
-    
+    from modules.invoice_analyzer_v2.stock_reversal_service import reverse_stock_for_invoice
+
     invoice = db.query(models.PurchaseInvoice).join(Shop).filter(
         models.PurchaseInvoice.id == invoice_id,
         Shop.organization_id == admin.organization_id
     ).first()
-    
+
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
-    
-    # Check if stock items are used in bills
-    stock_reversed = False
-    items_in_use = []
-    
-    if invoice.is_admin_verified:
-        try:
-            from modules.stock_audit_v2.models import StockItem
-            from modules.billing.models import BillItem
-            
-            for invoice_item in invoice.items:
-                stock_item = db.query(StockItem).filter(
-                    StockItem.shop_id == invoice.shop_id,
-                    StockItem.product_name == invoice_item.product_name,
-                    StockItem.batch_number == invoice_item.batch_number
-                ).first()
-                
-                if stock_item:
-                    bill_item_count = db.query(BillItem).filter(
-                        BillItem.stock_item_id == stock_item.id
-                    ).count()
-                    
-                    if bill_item_count > 0:
-                        # Item is used in bills, just reduce quantity and clear reference
-                        stock_item.quantity_software -= int(invoice_item.quantity)
-                        stock_item.source_invoice_id = None
-                        stock_item.updated_at = datetime.now()
-                        items_in_use.append(invoice_item.product_name)
-                        logger.info(f"Reversed stock for {stock_item.product_name}: -{invoice_item.quantity}")
-                    else:
-                        # Item not used in bills, can be deleted or quantity reduced
-                        stock_item.quantity_software -= int(invoice_item.quantity)
-                        
-                        if stock_item.quantity_software <= 0 and stock_item.source_invoice_id == invoice_id:
-                            # Clear the foreign key reference before deleting
-                            stock_item.source_invoice_id = None
-                            db.flush()  # Ensure FK is cleared before deletion
-                            db.delete(stock_item)
-                            logger.info(f"Deleted stock item {stock_item.id}")
-                        else:
-                            stock_item.source_invoice_id = None
-                            stock_item.updated_at = datetime.now()
-                            logger.info(f"Reversed stock for {stock_item.product_name}: -{invoice_item.quantity}")
-            
-            # Clear all foreign key references to this invoice before deletion
-            from modules.stock_audit_v2.models import StockItem
-            db.query(StockItem).filter(
-                StockItem.source_invoice_id == invoice_id
-            ).update({"source_invoice_id": None})
-            
-            db.flush()
-            stock_reversed = True
-        except Exception as e:
-            logger.error(f"Failed to reverse stock quantities: {e}")
-            db.rollback()
-            raise HTTPException(status_code=400, detail=f"Cannot delete invoice: {str(e)}")
-    
+
+    logger.info(
+        f"AUDIT | action=admin_delete | invoice_id={invoice_id} | "
+        f"admin_id={admin.id} | org_id={admin.organization_id} | at={datetime.now()}"
+    )
+
+    stock_reversed, items_in_use = reverse_stock_for_invoice(db, invoice, invoice_id, invoice.shop_id)
+
     pdf_path = invoice.pdf_path
     db.delete(invoice)
     db.commit()
-    
+
     if pdf_path:
         import os
         if os.path.exists(pdf_path):
@@ -284,16 +250,21 @@ def admin_delete_invoice(
                 os.remove(pdf_path)
             except Exception as e:
                 logger.warning(f"Failed to delete PDF file: {e}")
-    
+
+    # Invalidate dashboard cache
+    from app.utils.cache import dashboard_cache
+    dashboard_cache.clear_prefix(f"dashboard:{admin.organization_id}")
+    dashboard_cache.clear_prefix(f"ai_analytics:{admin.organization_id}")
+
     response = {"message": "Invoice deleted successfully", "stock_reversed": stock_reversed}
     if items_in_use:
         response["warning"] = f"{len(items_in_use)} items are used in bills and were not deleted from stock"
-    
+
     return response
 
 @router.get("/pending-admin-verification")
 def get_pending_admin_verification(
-    shop_id: int = None,
+    shop_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
     admin: Admin = Depends(get_current_admin)
 ):
@@ -350,7 +321,7 @@ def get_pending_admin_verification(
 
 @router.get("/pending-staff-verification")
 def get_pending_staff_verification(
-    shop_id: int = None,
+    shop_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
     admin: Admin = Depends(get_current_admin)
 ):
@@ -398,23 +369,24 @@ def get_pending_staff_verification(
 
 @router.get("/admin-invoices")
 def get_admin_invoices(
-    shop_id: int = None,
-    limit: int = 50,
+    shop_id: Optional[int] = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
     admin: Admin = Depends(get_current_admin)
 ):
     """Get all invoices for admin (across organization)"""
     from modules.invoice_analyzer_v2 import models
     from modules.auth.models import Shop, Staff
-    
+
     query = db.query(models.PurchaseInvoice).join(Shop).filter(
         Shop.organization_id == admin.organization_id
     )
-    
+
     if shop_id:
         query = query.filter(models.PurchaseInvoice.shop_id == shop_id)
-    
-    invoices = query.order_by(models.PurchaseInvoice.invoice_date.desc()).limit(limit).all()
+
+    invoices = query.order_by(models.PurchaseInvoice.invoice_date.desc()).offset(offset).limit(limit).all()
     
     result = []
     for inv in invoices:

@@ -33,13 +33,21 @@ class PurchaseInvoiceItemUpdate(BaseModel):
     igst_amount: float = 0.0
     total_amount: float
     custom_fields: Optional[Dict[str, Any]] = {}
-    
+
     @field_validator('manufacturing_date', 'expiry_date', mode='before')
     @classmethod
     def validate_dates(cls, v):
         if v == '' or v is None:
             return None
         return v
+
+    @field_validator('composition', 'manufacturer', 'hsn_code', 'product_name',
+                     'batch_number', 'package', 'unit', 'mrp', mode='before')
+    @classmethod
+    def sanitize_item_strings(cls, v):
+        if v is None:
+            return v
+        return str(v).strip()
 
 class PurchaseInvoiceUpdate(BaseModel):
     invoice_number: str
@@ -58,13 +66,21 @@ class PurchaseInvoiceUpdate(BaseModel):
     net_amount: float
     custom_fields: Optional[Dict[str, Any]] = {}
     items: List[PurchaseInvoiceItemUpdate]
-    
+
     @field_validator('due_date', mode='before')
     @classmethod
     def validate_due_date(cls, v):
         if v == '' or v is None:
             return None
         return v
+
+    @field_validator('invoice_number', 'supplier_name', 'supplier_address',
+                     'supplier_gstin', 'supplier_dl_numbers', 'supplier_phone', mode='before')
+    @classmethod
+    def sanitize_invoice_strings(cls, v):
+        if v is None:
+            return v
+        return str(v).strip()
 
 class PurchaseInvoiceItemResponse(BaseModel):
     id: int

@@ -1,15 +1,18 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from app.database.database import get_db
 from modules.invoice_analyzer_v2.staff.staff_dependencies import get_current_user_with_geofence as get_current_user
 from modules.auth.dependencies import get_current_user as get_user_dict
-from modules.auth.models import Staff
+from modules.auth.models import Staff, Shop
 from typing import List, Optional
 from datetime import datetime, date
 import os
 import shutil
 import logging
+import io
+import pandas as pd
 from modules.invoice_analyzer_v2 import models, schemas
 from modules.invoice_analyzer_v2.ai_extractor import AIInvoiceExtractor
 from modules.invoice_analyzer_v2.excel_extractor import ExcelInvoiceExtractor
@@ -17,6 +20,24 @@ from modules.invoice_analyzer_v2.excel_extractor import ExcelInvoiceExtractor
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def generate_invoice_number() -> str:
+    """Generate a unique invoice reference: PI-YYYYMMDD-XXXXXXXX"""
+    import uuid
+    date_str = datetime.now().strftime("%Y%m%d")
+    return f"PI-{date_str}-{uuid.uuid4().hex[:8].upper()}"
+
+
+def parse_mrp(mrp_str):
+    """Parse MRP from string — handles '10.5', '10.5/STRIP', '10.00/strip of 10' etc."""
+    if not mrp_str:
+        return None
+    try:
+        return float(str(mrp_str).strip().split('/')[0].strip())
+    except Exception:
+        return None
+
 
 # Upload directory
 UPLOAD_DIR = "uploads/invoices"
@@ -94,6 +115,28 @@ async def upload_invoice_pdf(
             # Proceed with extraction
             parsed_data = extractor.extract_from_pdf(file_path)
             logger.info(f"✅ PDF extraction completed - Found {len(parsed_data.get('items', []))} items")
+
+            # Patch header fields from validation detected_fields.
+            # The validation model (gemini-2.5-flash) reliably identifies header fields
+            # and should override fallback regex results when available.
+            detected = validation.get("detected_fields") or {}
+            header_patch_map = {
+                "invoice_number": "invoice_number",
+                "invoice_date": "invoice_date",
+                "supplier_name": "supplier_name",
+                "supplier_address": "supplier_address",
+                "supplier_gstin": "supplier_gstin",
+                "supplier_dl_numbers": "supplier_dl_numbers",
+                "supplier_phone": "supplier_phone",
+            }
+            for det_key, data_key in header_patch_map.items():
+                val = detected.get(det_key)
+                if val and val not in ("null", "None"):
+                    old = parsed_data.get(data_key)
+                    if old != val:
+                        logger.info(f"🔧 Patching {data_key}: '{old}' → '{val}'")
+                    parsed_data[data_key] = val
+
         else:  # Excel
             logger.info(f"📊 Starting Excel extraction...")
             
@@ -136,8 +179,16 @@ async def upload_invoice_pdf(
         error_msg = str(e) if str(e) else "Unknown error during file processing"
         raise HTTPException(status_code=400, detail=f"Failed to parse file: {error_msg}")
     
+    # Auto-generate invoice number if missing or unextractable
+    raw_number = (parsed_data.get("invoice_number") or "").strip()
+    if not raw_number or raw_number.upper() == "UNKNOWN":
+        invoice_number = generate_invoice_number()
+        parsed_data["invoice_number"] = invoice_number
+        logger.info(f"📋 Auto-generated invoice number: {invoice_number}")
+    else:
+        invoice_number = raw_number
+
     # Check for duplicate invoice
-    invoice_number = parsed_data.get("invoice_number", "UNKNOWN")
     supplier_name = parsed_data.get("supplier_name", "Unknown Supplier")
     net_amount = parsed_data.get("net_amount", 0.0)
     invoice_date_str = parsed_data.get("invoice_date")
@@ -147,37 +198,28 @@ async def upload_invoice_pdf(
     if invoice_date_str:
         try:
             invoice_date = datetime.strptime(invoice_date_str, "%d/%m/%Y").date()
-        except:
-            pass
+        except Exception as e:
+            logger.warning(f"⚠️ Could not parse invoice_date '{invoice_date_str}' for duplicate check: {e}")
     
     # Check 1: Exact invoice number match
     existing_by_number = db.query(models.PurchaseInvoice).filter(
         models.PurchaseInvoice.shop_id == shop_id,
         models.PurchaseInvoice.invoice_number == invoice_number
     ).first()
-    
+
     if existing_by_number:
         os.remove(file_path)
-        raise HTTPException(
-            status_code=409,
-            detail=f"Duplicate invoice detected! Invoice number '{invoice_number}' already exists (Invoice ID: {existing_by_number.id})."
-        )
-    
-    # Check 2: Similar invoice (same supplier + date + amount)
-    if invoice_date and supplier_name and net_amount > 0:
-        existing_similar = db.query(models.PurchaseInvoice).filter(
-            models.PurchaseInvoice.shop_id == shop_id,
-            models.PurchaseInvoice.supplier_name == supplier_name,
-            func.date(models.PurchaseInvoice.invoice_date) == invoice_date,
-            models.PurchaseInvoice.net_amount == net_amount
-        ).first()
-        
-        if existing_similar:
-            os.remove(file_path)
+        if existing_by_number.is_admin_verified:
             raise HTTPException(
                 status_code=409,
-                detail=f"Possible duplicate invoice detected! A similar invoice from '{supplier_name}' with same date ({invoice_date_str}) and amount (₹{net_amount:.2f}) already exists (Invoice: {existing_similar.invoice_number})."
+                detail=f"Invoice number '{invoice_number}' already exists and has been admin-approved. Contact your admin to make changes (Invoice ID: {existing_by_number.id})."
             )
+        else:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Invoice number '{invoice_number}' already exists (Invoice ID: {existing_by_number.id}). It has not been approved yet — go to Invoice List and edit it directly instead of re-uploading."
+            )
+
     
     # Parse dates
     def parse_date(date_str):
@@ -185,7 +227,8 @@ async def upload_invoice_pdf(
             return None
         try:
             return datetime.strptime(date_str, "%d/%m/%Y")
-        except:
+        except Exception as e:
+            logger.warning(f"⚠️ Could not parse date '{date_str}': {e}")
             return None
     
     # Create invoice record
@@ -233,9 +276,9 @@ async def upload_invoice_pdf(
                     # If 3 parts (DD/MM/YYYY), parse as-is
                     elif len(parts) == 3:
                         expiry_date = datetime.strptime(expiry_str, "%d/%m/%Y").date()
-            except:
-                pass
-        
+            except Exception as e:
+                logger.warning(f"⚠️ Could not parse expiry_date '{item_data.get('expiry_date')}' for item '{item_data.get('product_name')}': {e}")
+
         # Parse manufacturing date
         manufacturing_date = None
         if item_data.get("manufacturing_date"):
@@ -249,8 +292,8 @@ async def upload_invoice_pdf(
                         manufacturing_date = datetime.strptime(f"01/{mfg_str}", "%d/%m/%Y").date()
                     elif len(parts) == 3:
                         manufacturing_date = datetime.strptime(mfg_str, "%d/%m/%Y").date()
-            except:
-                pass
+            except Exception as e:
+                logger.warning(f"⚠️ Could not parse manufacturing_date '{item_data.get('manufacturing_date')}' for item '{item_data.get('product_name')}': {e}")
         
         # Truncate string fields to prevent database errors
         def truncate_str(value, max_length=255):
@@ -389,10 +432,11 @@ def update_invoice(
         if isinstance(date_obj, str):
             try:
                 return datetime.strptime(date_obj, "%Y-%m-%d").date()
-            except:
+            except Exception as e:
+                logger.warning(f"⚠️ Could not parse date '{date_obj}': {e}")
                 return None
         return date_obj
-    
+
     # Update invoice fields
     invoice.invoice_number = invoice_data.invoice_number
     invoice.invoice_date = parse_date(invoice_data.invoice_date)
@@ -479,101 +523,6 @@ def update_invoice(
     
     return invoice
 
-@router.get("/{invoice_id}", response_model=schemas.PurchaseInvoiceResponse)
-def get_invoice(
-    invoice_id: int,
-    db: Session = Depends(get_db),
-    user_dict: dict = Depends(get_user_dict)
-):
-    """Get specific invoice details - accessible by both staff and admin"""
-    from modules.auth.models import Admin, Shop
-    
-    user_type = user_dict["token_data"].user_type
-    
-    # Query invoice based on user type
-    if user_type == "staff":
-        staff = user_dict["user"]
-        shop_code = user_dict["token_data"].shop_code
-        
-        if not shop_code:
-            raise HTTPException(status_code=400, detail="Shop code not found in token")
-        
-        shop = db.query(Shop).filter(
-            Shop.shop_code == shop_code,
-            Shop.organization_id == staff.shop.organization_id
-        ).first()
-        if not shop:
-            raise HTTPException(status_code=404, detail=f"Shop not found with code: {shop_code}")
-        
-        invoice = db.query(models.PurchaseInvoice).filter(
-            models.PurchaseInvoice.id == invoice_id,
-            models.PurchaseInvoice.shop_id == shop.id
-        ).first()
-    
-    elif user_type == "admin":
-        admin = user_dict["user"]
-        invoice = db.query(models.PurchaseInvoice).join(Shop).filter(
-            models.PurchaseInvoice.id == invoice_id,
-            Shop.organization_id == admin.organization_id
-        ).first()
-    
-    else:
-        raise HTTPException(status_code=403, detail="Staff or Admin access required")
-    
-    if not invoice:
-        raise HTTPException(status_code=404, detail="Invoice not found")
-    
-    # Get verified_by_name (staff who verified)
-    staff_verified_by_name = None
-    if invoice.staff_verified_by:
-        verifier = db.query(Staff).filter(Staff.id == invoice.staff_verified_by).first()
-        if verifier:
-            staff_verified_by_name = verifier.name
-    
-    # Get admin_verified_by_name
-    admin_verified_by_name = None
-    if invoice.admin_verified_by:
-        admin_verifier = db.query(Admin).filter(Admin.id == invoice.admin_verified_by).first()
-        if admin_verifier:
-            admin_verified_by_name = admin_verifier.full_name
-    
-    # Convert to dict and add verified_by_name
-    invoice_dict = {
-        "id": invoice.id,
-        "shop_id": invoice.shop_id,
-        "staff_id": invoice.staff_id,
-        "staff_name": invoice.staff_name,
-        "invoice_number": invoice.invoice_number,
-        "invoice_date": invoice.invoice_date,
-        "due_date": invoice.due_date,
-        "supplier_name": invoice.supplier_name,
-        "supplier_address": invoice.supplier_address,
-        "supplier_gstin": invoice.supplier_gstin,
-        "supplier_dl_numbers": invoice.supplier_dl_numbers,
-        "supplier_phone": invoice.supplier_phone,
-        "gross_amount": invoice.gross_amount,
-        "discount_amount": invoice.discount_amount,
-        "taxable_amount": invoice.taxable_amount,
-        "cgst_amount": invoice.cgst_amount,
-        "sgst_amount": invoice.sgst_amount,
-        "igst_amount": invoice.igst_amount,
-        "total_gst": invoice.total_gst,
-        "round_off": invoice.round_off,
-        "net_amount": invoice.net_amount,
-        "pdf_filename": invoice.pdf_filename,
-        "custom_fields": invoice.custom_fields or {},
-        "is_staff_verified": invoice.is_staff_verified,
-        "staff_verified_by_name": staff_verified_by_name,
-        "staff_verified_at": invoice.staff_verified_at,
-        "is_admin_verified": invoice.is_admin_verified,
-        "admin_verified_by_name": admin_verified_by_name,
-        "admin_verified_at": invoice.admin_verified_at,
-        "created_at": invoice.created_at,
-        "items": invoice.items
-    }
-    
-    return invoice_dict
-
 @router.delete("/{invoice_id}")
 def delete_invoice(
     invoice_id: int,
@@ -581,86 +530,38 @@ def delete_invoice(
     current_user: tuple = Depends(get_current_user)
 ):
     """Delete invoice and reverse stock quantities"""
+    from modules.invoice_analyzer_v2.stock_reversal_service import reverse_stock_for_invoice
+
     staff, shop_id = current_user
-    
+
     invoice = db.query(models.PurchaseInvoice).filter(
         models.PurchaseInvoice.id == invoice_id,
         models.PurchaseInvoice.shop_id == shop_id
     ).first()
-    
+
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
-    
-    # Check if stock items are used in bills
-    stock_reversed = False
-    items_in_use = []
-    
-    if invoice.is_admin_verified:
-        try:
-            from modules.stock_audit_v2.models import StockItem
-            from modules.billing.models import BillItem
-            
-            for invoice_item in invoice.items:
-                # Find corresponding stock item
-                stock_item = db.query(StockItem).filter(
-                    StockItem.shop_id == shop_id,
-                    StockItem.product_name == invoice_item.product_name,
-                    StockItem.batch_number == invoice_item.batch_number
-                ).first()
-                
-                if stock_item:
-                    # Check if stock item is used in any bills
-                    bill_item_count = db.query(BillItem).filter(
-                        BillItem.stock_item_id == stock_item.id
-                    ).count()
-                    
-                    if bill_item_count > 0:
-                        # Stock item is used in bills, only reverse quantity and nullify source
-                        stock_item.quantity_software -= int(invoice_item.quantity)
-                        stock_item.source_invoice_id = None  # Nullify reference
-                        stock_item.updated_at = datetime.now()
-                        items_in_use.append(invoice_item.product_name)
-                        logger.info(f"Reversed stock for {stock_item.product_name}: -{invoice_item.quantity} (item in use, not deleted)")
-                    else:
-                        # Stock item not used in bills, safe to delete if quantity <= 0
-                        stock_item.quantity_software -= int(invoice_item.quantity)
-                        
-                        if stock_item.quantity_software <= 0 and stock_item.source_invoice_id == invoice_id:
-                            db.delete(stock_item)
-                            logger.info(f"Deleted stock item {stock_item.id} (quantity became {stock_item.quantity_software})")
-                        else:
-                            stock_item.source_invoice_id = None  # Nullify reference
-                            stock_item.updated_at = datetime.now()
-                            logger.info(f"Reversed stock for {stock_item.product_name}: -{invoice_item.quantity}")
-            
-            db.flush()
-            stock_reversed = True
-        except Exception as e:
-            logger.error(f"Failed to reverse stock quantities: {e}")
-            db.rollback()
-            raise HTTPException(
-                status_code=400,
-                detail=f"Cannot delete invoice: {str(e)}"
-            )
-    
+
+    stock_reversed, items_in_use = reverse_stock_for_invoice(db, invoice, invoice_id, shop_id)
+
     # Store pdf_path before deleting invoice
     pdf_path = invoice.pdf_path
-    
+
     # Delete invoice (cascade will delete items)
     db.delete(invoice)
     db.commit()
-    
+
     # Delete PDF file after successful commit
     if pdf_path and os.path.exists(pdf_path):
         try:
             os.remove(pdf_path)
         except Exception as e:
             logger.warning(f"Failed to delete PDF file: {e}")
-    
+
     response = {"message": "Invoice deleted successfully", "stock_reversed": stock_reversed}
     if items_in_use:
         response["warning"] = f"{len(items_in_use)} items are used in bills and were not deleted from stock"
-    
+
     return response
 
 @router.post("/create", response_model=schemas.PurchaseInvoiceResponse)
@@ -671,12 +572,28 @@ def create_invoice_manually(
 ):
     """Create invoice manually without file upload"""
     staff, shop_id = current_user
-    
+
+    # Auto-generate invoice number if not provided
+    inv_number = (invoice_data.invoice_number or "").strip()
+    if not inv_number:
+        inv_number = generate_invoice_number()
+
+    # Enforce uniqueness within the shop
+    existing = db.query(models.PurchaseInvoice).filter(
+        models.PurchaseInvoice.shop_id == shop_id,
+        models.PurchaseInvoice.invoice_number == inv_number
+    ).first()
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Invoice number '{inv_number}' already exists. Please use a different number."
+        )
+
     invoice = models.PurchaseInvoice(
         shop_id=shop_id,
         staff_id=staff.id,
         staff_name=staff.name,
-        invoice_number=invoice_data.invoice_number,
+        invoice_number=inv_number,
         invoice_date=invoice_data.invoice_date,
         due_date=invoice_data.due_date,
         supplier_name=invoice_data.supplier_name,
@@ -829,30 +746,25 @@ def get_fields_guide():
         raise HTTPException(status_code=404, detail="Fields guide not found")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error reading guide: {str(e)}")
-from fastapi import APIRouter, HTTPException
-import os
 
 
-@router.get("/fields-guide")
-def get_fields_guide():
-    """Get invoice fields documentation - Public endpoint"""
-    guide_path = os.path.join(os.path.dirname(__file__), "INVOICE_FIELDS_GUIDE.md")
+@router.get("/download-pdf-template")
+def download_pdf_template(current_user: tuple = Depends(get_current_user)):
+    """Download PDF template/sample for invoice upload (requires authentication)"""
+    from fastapi.responses import FileResponse
+    staff, shop_id = current_user
     
-    try:
-        with open(guide_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-        return {"content": content, "format": "markdown"}
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="Fields guide not found")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error reading guide: {str(e)}")
-from fastapi import APIRouter, Depends
-from fastapi.responses import StreamingResponse
-import pandas as pd
-import io
-from datetime import datetime
-from modules.invoice_analyzer_v2.staff.staff_dependencies import get_current_user_with_geofence as get_current_user
-
+    # Path to sample PDF template
+    template_path = os.path.join(os.path.dirname(__file__), "sample_invoice_template.pdf")
+    
+    if not os.path.exists(template_path):
+        raise HTTPException(status_code=404, detail="PDF template not found")
+    
+    return FileResponse(
+        path=template_path,
+        media_type="application/pdf",
+        filename="purchase_invoice_sample.pdf"
+    )
 
 @router.get("/download-template")
 def download_excel_template(current_user: tuple = Depends(get_current_user)):
@@ -1222,11 +1134,23 @@ async def get_margin_playground(
     db: Session = Depends(get_db),
     current_admin = Depends(get_current_admin)
 ):
-    """Comprehensive margin playground data for admin"""
-    query = db.query(PurchaseInvoiceItem).join(PurchaseInvoice).filter(
-        PurchaseInvoice.is_admin_verified == True
+    """
+    Purchase Margin Analysis for admin.
+
+    These products are purchased from distributors and NOT yet sold to customers.
+    Metrics are purchase-side:
+      - purchase_value    : unit_price × quantity  (what was paid to distributor)
+      - purchase_margin   : (MRP - unit_price) / MRP × 100  (potential margin if sold at MRP)
+      - potential_profit  : (MRP - unit_price) × quantity   (profit if every unit sold at MRP)
+    """
+
+    query = db.query(PurchaseInvoiceItem).join(PurchaseInvoice).join(
+        Shop, PurchaseInvoice.shop_id == Shop.id
+    ).filter(
+        PurchaseInvoice.is_admin_verified == True,
+        Shop.organization_id == current_admin.organization_id
     )
-    
+
     if shop_id:
         query = query.filter(PurchaseInvoice.shop_id == shop_id)
     if product_name:
@@ -1235,158 +1159,228 @@ async def get_margin_playground(
         query = query.filter(PurchaseInvoiceItem.composition.ilike(f"%{composition}%"))
     if manufacturer:
         query = query.filter(PurchaseInvoiceItem.manufacturer.ilike(f"%{manufacturer}%"))
-    if margin_min is not None:
-        query = query.filter(PurchaseInvoiceItem.profit_margin >= margin_min)
-    if margin_max is not None:
-        query = query.filter(PurchaseInvoiceItem.profit_margin <= margin_max)
     if date_from:
         query = query.filter(PurchaseInvoice.invoice_date >= date_from)
     if date_to:
         query = query.filter(PurchaseInvoice.invoice_date <= date_to)
-    
+
     items = query.all()
-    
+
+    empty_response = {
+        "summary": {
+            "total_items": 0, "total_purchase_value": 0, "total_potential_profit": 0,
+            "avg_purchase_margin": 0, "min_purchase_margin": 0, "max_purchase_margin": 0,
+            "items_with_mrp": 0, "items_without_mrp": 0, "products_with_multiple_suppliers": 0
+        },
+        "top_products": [], "supplier_breakdown": [],
+        "margin_distribution": [], "distributor_comparison": []
+    }
     if not items:
-        return {
-            "summary": {"avg_margin": 0, "total_revenue": 0, "total_cost": 0, "total_profit": 0, "total_items": 0, "min_margin": 0, "max_margin": 0},
-            "items": [],
-            "margin_distribution": [],
-            "composition_breakdown": [],
-            "product_breakdown": [],
-            "manufacturer_breakdown": []
-        }
-    
-    margins = [item.profit_margin for item in items if item.profit_margin is not None]
-    total_cost = sum(item.unit_price * item.quantity for item in items)
-    total_revenue = sum(item.selling_price * item.quantity for item in items)
-    
-    # Margin distribution
-    distribution = [
-        {"range": "0-10%", "count": sum(1 for m in margins if 0 <= m < 10)},
-        {"range": "10-20%", "count": sum(1 for m in margins if 10 <= m < 20)},
-        {"range": "20-30%", "count": sum(1 for m in margins if 20 <= m < 30)},
-        {"range": "30-40%", "count": sum(1 for m in margins if 30 <= m < 40)},
-        {"range": "40-50%", "count": sum(1 for m in margins if 40 <= m < 50)},
-        {"range": "50%+", "count": sum(1 for m in margins if m >= 50)}
-    ]
-    
-    # Composition breakdown
-    comp_data = {}
+        return empty_response
+
+    # ── Per-item metrics (purchase-side only) ─────────────────────────────────
+    item_metrics = []
     for item in items:
-        if item.composition:
-            if item.composition not in comp_data:
-                comp_data[item.composition] = {"revenue": 0, "cost": 0, "items": 0, "margins": []}
-            comp_data[item.composition]["revenue"] += item.selling_price * item.quantity
-            comp_data[item.composition]["cost"] += item.unit_price * item.quantity
-            comp_data[item.composition]["items"] += 1
-            comp_data[item.composition]["margins"].append(item.profit_margin)
-    
-    composition_breakdown = [{
-        "composition": k,
-        "revenue": round(v["revenue"], 2),
-        "cost": round(v["cost"], 2),
-        "profit": round(v["revenue"] - v["cost"], 2),
-        "avg_margin": round(sum(v["margins"]) / len(v["margins"]), 2) if v["margins"] else 0,
-        "items": v["items"]
-    } for k, v in sorted(comp_data.items(), key=lambda x: x[1]["revenue"], reverse=True)[:15]]
-    
-    # Product breakdown
+        mrp_value = parse_mrp(item.mrp)
+        purchase_price = item.unit_price
+        qty = item.quantity
+        purchase_value = purchase_price * qty
+
+        if mrp_value and mrp_value > 0 and purchase_price > 0 and mrp_value >= purchase_price:
+            purchase_margin = ((mrp_value - purchase_price) / mrp_value) * 100
+            potential_profit = (mrp_value - purchase_price) * qty
+            has_mrp = True
+        else:
+            purchase_margin = 0
+            potential_profit = 0
+            has_mrp = False
+
+        supplier_name = item.invoice.supplier_name if item.invoice else "Unknown"
+
+        item_metrics.append({
+            "id": item.id,
+            "product_name": item.product_name or "Unknown",
+            "composition": item.composition,
+            "manufacturer": item.manufacturer,
+            "batch_number": item.batch_number,
+            "supplier_name": supplier_name,
+            "purchase_price": round(purchase_price, 2),
+            "mrp": mrp_value,
+            "mrp_str": item.mrp,
+            "quantity": qty,
+            "purchase_value": round(purchase_value, 2),
+            "purchase_margin": round(purchase_margin, 2),
+            "potential_profit": round(potential_profit, 2),
+            "has_mrp": has_mrp,
+            "invoice_date": item.invoice.invoice_date.isoformat() if item.invoice else None,
+        })
+
+    # Apply margin range filter (after MRP-based computation)
+    if margin_min is not None:
+        item_metrics = [m for m in item_metrics if m["purchase_margin"] >= margin_min]
+    if margin_max is not None:
+        item_metrics = [m for m in item_metrics if m["purchase_margin"] <= margin_max]
+
+    if not item_metrics:
+        return empty_response
+
+    # ── Summary ───────────────────────────────────────────────────────────────
+    all_margins = [m["purchase_margin"] for m in item_metrics if m["has_mrp"]]
+    total_purchase_value = sum(m["purchase_value"] for m in item_metrics)
+    total_potential_profit = sum(m["potential_profit"] for m in item_metrics)
+    items_with_mrp = sum(1 for m in item_metrics if m["has_mrp"])
+
+    # ── Top Products by purchase value ────────────────────────────────────────
     prod_data = {}
-    for item in items:
-        if item.product_name:
-            key = f"{item.product_name}|{item.composition or ''}"
-            if key not in prod_data:
-                prod_data[key] = {"product_name": item.product_name, "composition": item.composition, "revenue": 0, "cost": 0, "margins": [], "qty": 0}
-            prod_data[key]["revenue"] += item.selling_price * item.quantity
-            prod_data[key]["cost"] += item.unit_price * item.quantity
-            prod_data[key]["margins"].append(item.profit_margin)
-            prod_data[key]["qty"] += item.quantity
-    
-    product_breakdown = [{
+    for m in item_metrics:
+        key = m["product_name"]
+        if key not in prod_data:
+            prod_data[key] = {
+                "product_name": m["product_name"],
+                "composition": m["composition"],
+                "purchase_value": 0, "potential_profit": 0,
+                "quantity": 0, "margins": [], "suppliers": set()
+            }
+        prod_data[key]["purchase_value"] += m["purchase_value"]
+        prod_data[key]["potential_profit"] += m["potential_profit"]
+        prod_data[key]["quantity"] += m["quantity"]
+        if m["has_mrp"]:
+            prod_data[key]["margins"].append(m["purchase_margin"])
+        prod_data[key]["suppliers"].add(m["supplier_name"])
+
+    top_products = sorted([{
         "product_name": v["product_name"],
         "composition": v["composition"],
-        "revenue": round(v["revenue"], 2),
-        "cost": round(v["cost"], 2),
-        "profit": round(v["revenue"] - v["cost"], 2),
-        "avg_margin": round(sum(v["margins"]) / len(v["margins"]), 2) if v["margins"] else 0,
-        "quantity": v["qty"]
-    } for v in sorted(prod_data.values(), key=lambda x: x["revenue"], reverse=True)[:20]]
-    
-    # Manufacturer breakdown
-    mfr_data = {}
-    for item in items:
-        if item.manufacturer:
-            if item.manufacturer not in mfr_data:
-                mfr_data[item.manufacturer] = {"revenue": 0, "cost": 0, "margins": [], "items": 0}
-            mfr_data[item.manufacturer]["revenue"] += item.selling_price * item.quantity
-            mfr_data[item.manufacturer]["cost"] += item.unit_price * item.quantity
-            mfr_data[item.manufacturer]["margins"].append(item.profit_margin)
-            mfr_data[item.manufacturer]["items"] += 1
-    
-    manufacturer_breakdown = [{
-        "manufacturer": k,
-        "revenue": round(v["revenue"], 2),
-        "cost": round(v["cost"], 2),
-        "profit": round(v["revenue"] - v["cost"], 2),
-        "avg_margin": round(sum(v["margins"]) / len(v["margins"]), 2) if v["margins"] else 0,
-        "items": v["items"]
-    } for k, v in sorted(mfr_data.items(), key=lambda x: x[1]["revenue"], reverse=True)[:10]]
-    
-    # Item details
-    item_details = [{
-        "id": item.id,
-        "product_name": item.product_name,
-        "composition": item.composition,
-        "manufacturer": item.manufacturer,
-        "unit_price": round(item.unit_price, 2),
-        "selling_price": round(item.selling_price, 2),
-        "mrp": item.mrp,
-        "profit_margin": round(item.profit_margin, 2) if item.profit_margin else 0,
-        "quantity": item.quantity,
-        "total_cost": round(item.unit_price * item.quantity, 2),
-        "total_revenue": round(item.selling_price * item.quantity, 2),
-        "total_profit": round((item.selling_price - item.unit_price) * item.quantity, 2)
-    } for item in items[:100]]  # Limit to 100 items for performance
-    
-    # Calculate additional insights
-    median_margin = round(statistics.median(margins), 2) if margins else 0
-    margin_std_dev = round(statistics.stdev(margins), 2) if len(margins) > 1 else 0
-    
-    # Low margin products (below 20%)
-    low_margin_items = [item for item in items if item.profit_margin and item.profit_margin < 20]
-    low_margin_revenue = sum(item.selling_price * item.quantity for item in low_margin_items)
-    
-    # High margin products (above 40%)
-    high_margin_items = [item for item in items if item.profit_margin and item.profit_margin > 40]
-    high_margin_revenue = sum(item.selling_price * item.quantity for item in high_margin_items)
-    
-    # Margin efficiency score (weighted by revenue)
-    total_weighted_margin = sum((item.profit_margin or 0) * (item.selling_price * item.quantity) for item in items)
-    margin_efficiency = round((total_weighted_margin / total_revenue * 100) if total_revenue > 0 else 0, 2)
-    
+        "purchase_value": round(v["purchase_value"], 2),
+        "potential_profit": round(v["potential_profit"], 2),
+        "quantity": round(v["quantity"], 2),
+        "avg_purchase_margin": round(sum(v["margins"]) / len(v["margins"]), 2) if v["margins"] else 0,
+        "supplier_count": len(v["suppliers"]),
+        "suppliers": list(v["suppliers"])
+    } for v in prod_data.values()], key=lambda x: x["purchase_value"], reverse=True)[:20]
+
+    # ── Supplier breakdown — who gives the best margins ───────────────────────
+    supplier_data = {}
+    for m in item_metrics:
+        s = m["supplier_name"]
+        if s not in supplier_data:
+            supplier_data[s] = {
+                "supplier_name": s,
+                "total_purchase_value": 0, "total_potential_profit": 0,
+                "item_count": 0, "margins": [], "products": set()
+            }
+        supplier_data[s]["total_purchase_value"] += m["purchase_value"]
+        supplier_data[s]["total_potential_profit"] += m["potential_profit"]
+        supplier_data[s]["item_count"] += 1
+        if m["has_mrp"]:
+            supplier_data[s]["margins"].append(m["purchase_margin"])
+        supplier_data[s]["products"].add(m["product_name"])
+
+    supplier_breakdown = sorted([{
+        "supplier_name": v["supplier_name"],
+        "total_purchase_value": round(v["total_purchase_value"], 2),
+        "total_potential_profit": round(v["total_potential_profit"], 2),
+        "item_count": v["item_count"],
+        "product_count": len(v["products"]),
+        "avg_margin_offered": round(sum(v["margins"]) / len(v["margins"]), 2) if v["margins"] else 0
+    } for v in supplier_data.values()], key=lambda x: x["avg_margin_offered"], reverse=True)
+
+    # ── Margin distribution ───────────────────────────────────────────────────
+    distribution = [
+        {"range": "0-10%",  "count": sum(1 for m in all_margins if 0  <= m < 10)},
+        {"range": "10-20%", "count": sum(1 for m in all_margins if 10 <= m < 20)},
+        {"range": "20-30%", "count": sum(1 for m in all_margins if 20 <= m < 30)},
+        {"range": "30-40%", "count": sum(1 for m in all_margins if 30 <= m < 40)},
+        {"range": "40-50%", "count": sum(1 for m in all_margins if 40 <= m < 50)},
+        {"range": "50%+",   "count": sum(1 for m in all_margins if m  >= 50)}
+    ]
+
+    # ── Distributor comparison — same medicine, different suppliers ───────────
+    # Group by product_name, collect all distributors who supplied it
+    comp_group = {}
+    for m in item_metrics:
+        key = m["product_name"]
+        if key not in comp_group:
+            comp_group[key] = {
+                "product_name": m["product_name"],
+                "composition": m["composition"],
+                "mrp": m["mrp"],
+                "entries": {}
+            }
+        s = m["supplier_name"]
+        if s not in comp_group[key]["entries"]:
+            comp_group[key]["entries"][s] = {
+                "supplier_name": s,
+                "total_qty": 0, "total_purchase_value": 0,
+                "prices": [], "mrp": m["mrp"], "has_mrp": m["has_mrp"]
+            }
+        comp_group[key]["entries"][s]["total_qty"] += m["quantity"]
+        comp_group[key]["entries"][s]["total_purchase_value"] += m["purchase_value"]
+        comp_group[key]["entries"][s]["prices"].append(m["purchase_price"])
+
+    distributor_comparison = []
+    for key, data in comp_group.items():
+        entries = list(data["entries"].values())
+        if len(entries) < 2:
+            continue  # Only show products with 2+ distributors
+
+        supplier_list = []
+        for e in entries:
+            avg_price = e["total_purchase_value"] / e["total_qty"] if e["total_qty"] > 0 else 0
+            mrp_v = e["mrp"]
+            if mrp_v and mrp_v > 0 and avg_price > 0 and mrp_v >= avg_price:
+                margin = ((mrp_v - avg_price) / mrp_v) * 100
+            else:
+                margin = None
+            supplier_list.append({
+                "supplier_name": e["supplier_name"],
+                "avg_purchase_price": round(avg_price, 2),
+                "purchase_margin": round(margin, 2) if margin is not None else None,
+                "total_qty": round(e["total_qty"], 2),
+                "total_purchase_value": round(e["total_purchase_value"], 2),
+            })
+
+        # Sort: best margin (highest) first
+        supplier_list.sort(key=lambda x: x["purchase_margin"] if x["purchase_margin"] is not None else -999, reverse=True)
+
+        # Badge best and worst
+        if supplier_list[0]["purchase_margin"] is not None:
+            supplier_list[0]["badge"] = "best"
+        if len(supplier_list) > 1 and supplier_list[-1]["purchase_margin"] is not None:
+            supplier_list[-1]["badge"] = "worst"
+
+        valid_margins = [s["purchase_margin"] for s in supplier_list if s["purchase_margin"] is not None]
+        margin_gap = round(max(valid_margins) - min(valid_margins), 2) if len(valid_margins) >= 2 else 0
+
+        distributor_comparison.append({
+            "product_name": data["product_name"],
+            "composition": data["composition"],
+            "mrp": data["mrp"],
+            "supplier_count": len(supplier_list),
+            "best_margin": supplier_list[0]["purchase_margin"],
+            "margin_gap": margin_gap,
+            "suppliers": supplier_list
+        })
+
+    # Sort by margin gap (biggest savings opportunity first)
+    distributor_comparison.sort(key=lambda x: x["margin_gap"] if x["margin_gap"] else 0, reverse=True)
+
     return {
         "summary": {
-            "avg_margin": round(sum(margins) / len(margins), 2) if margins else 0,
-            "median_margin": median_margin,
-            "margin_std_dev": margin_std_dev,
-            "total_revenue": round(total_revenue, 2),
-            "total_cost": round(total_cost, 2),
-            "total_profit": round(total_revenue - total_cost, 2),
-            "total_items": len(items),
-            "min_margin": round(min(margins), 2) if margins else 0,
-            "max_margin": round(max(margins), 2) if margins else 0,
-            "low_margin_count": len(low_margin_items),
-            "low_margin_revenue": round(low_margin_revenue, 2),
-            "high_margin_count": len(high_margin_items),
-            "high_margin_revenue": round(high_margin_revenue, 2),
-            "margin_efficiency_score": margin_efficiency,
-            "roi_percentage": round(((total_revenue - total_cost) / total_cost * 100) if total_cost > 0 else 0, 2)
+            "total_items": len(item_metrics),
+            "total_purchase_value": round(total_purchase_value, 2),
+            "total_potential_profit": round(total_potential_profit, 2),
+            "avg_purchase_margin": round(sum(all_margins) / len(all_margins), 2) if all_margins else 0,
+            "min_purchase_margin": round(min(all_margins), 2) if all_margins else 0,
+            "max_purchase_margin": round(max(all_margins), 2) if all_margins else 0,
+            "items_with_mrp": items_with_mrp,
+            "items_without_mrp": len(item_metrics) - items_with_mrp,
+            "products_with_multiple_suppliers": len(distributor_comparison)
         },
-        "items": item_details,
+        "top_products": top_products,
+        "supplier_breakdown": supplier_breakdown,
         "margin_distribution": distribution,
-        "composition_breakdown": composition_breakdown,
-        "product_breakdown": product_breakdown,
-        "manufacturer_breakdown": manufacturer_breakdown
+        "distributor_comparison": distributor_comparison[:30]
     }
 
 @router.post("/analytics/simulate-margin-change")
@@ -1397,8 +1391,11 @@ async def simulate_margin_change(
     current_admin = Depends(get_current_admin)
 ):
     """Simulate margin changes for products/compositions"""
-    query = db.query(PurchaseInvoiceItem).join(PurchaseInvoice).filter(
-        PurchaseInvoice.is_admin_verified == True
+    query = db.query(PurchaseInvoiceItem).join(PurchaseInvoice).join(
+        Shop, PurchaseInvoice.shop_id == Shop.id
+    ).filter(
+        PurchaseInvoice.is_admin_verified == True,
+        Shop.organization_id == current_admin.organization_id
     )
     
     if shop_id:
@@ -1422,7 +1419,7 @@ async def simulate_margin_change(
             new_selling_price = new_selling_price * (1 - request.apply_discount / 100)
         
         # Check MRP cap
-        mrp_value = float(item.mrp) if item.mrp and str(item.mrp).replace('.', '').replace('-', '').isdigit() else None
+        mrp_value = parse_mrp(item.mrp)
         capped = False
         
         if mrp_value and new_selling_price > mrp_value:
@@ -1482,8 +1479,11 @@ async def get_pricing_optimization(
     current_admin = Depends(get_current_admin)
 ):
     """Get pricing optimization recommendations"""
-    query = db.query(PurchaseInvoiceItem).join(PurchaseInvoice).filter(
-        PurchaseInvoice.is_admin_verified == True
+    query = db.query(PurchaseInvoiceItem).join(PurchaseInvoice).join(
+        Shop, PurchaseInvoice.shop_id == Shop.id
+    ).filter(
+        PurchaseInvoice.is_admin_verified == True,
+        Shop.organization_id == current_admin.organization_id
     )
     
     if shop_id:
@@ -1498,10 +1498,7 @@ async def get_pricing_optimization(
             optimal_price = item.unit_price * (1 + target_margin / 100)
             
             # Check MRP constraint
-            try:
-                mrp_value = float(str(item.mrp).split('/')[0]) if item.mrp else None
-            except:
-                mrp_value = None
+            mrp_value = parse_mrp(item.mrp)
             
             if mrp_value and optimal_price > mrp_value:
                 # MRP-constrained - calculate max achievable margin
@@ -1565,10 +1562,13 @@ async def get_margin_trends(
     """Get margin trends over time"""
     end_date = datetime.now().date()
     start_date = end_date - timedelta(days=months * 30)
-    
-    query = db.query(PurchaseInvoiceItem).join(PurchaseInvoice).filter(
+
+    query = db.query(PurchaseInvoiceItem).join(PurchaseInvoice).join(
+        Shop, PurchaseInvoice.shop_id == Shop.id
+    ).filter(
         PurchaseInvoice.is_admin_verified == True,
-        PurchaseInvoice.invoice_date >= start_date
+        PurchaseInvoice.invoice_date >= start_date,
+        Shop.organization_id == current_admin.organization_id
     )
     
     if shop_id:
@@ -1607,4 +1607,242 @@ async def get_margin_trends(
         }
     }
 
+@router.get("/staff/expiry-alerts")
+def get_expiry_alerts_staff(
+    days_threshold: int = Query(90, description="Days threshold for expiry warning"),
+    db: Session = Depends(get_db),
+    user_dict: dict = Depends(get_user_dict)
+):
+    """Get expiry alerts for staff's shop (ADMIN-VERIFIED INVOICES ONLY)"""
+    from modules.invoice_analyzer_v2.models import PurchaseInvoice, PurchaseInvoiceItem
+    from modules.auth.models import Shop
+    from datetime import date, timedelta
 
+    if user_dict["token_data"].user_type != "staff":
+        raise HTTPException(status_code=403, detail="Staff access required")
+
+    staff = user_dict["user"]
+    shop_code = user_dict["token_data"].shop_code
+    shop = db.query(Shop).filter(
+        Shop.shop_code == shop_code,
+        Shop.organization_id == staff.shop.organization_id
+    ).first()
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+    shop_id = shop.id
+
+    items = db.query(PurchaseInvoiceItem).join(PurchaseInvoice).filter(
+        PurchaseInvoiceItem.shop_id == shop_id,
+        PurchaseInvoice.is_admin_verified == True,
+        PurchaseInvoiceItem.expiry_date.isnot(None)
+    ).all()
+
+    expired = []
+    expiring_soon = []
+    safe = []
+    today = date.today()
+
+    for item in items:
+        days_to_expiry = (item.expiry_date - today).days
+        item_data = {
+            "product_name": item.product_name,
+            "batch_number": item.batch_number,
+            "quantity": item.quantity,
+            "expiry_date": item.expiry_date.isoformat(),
+            "days_to_expiry": days_to_expiry,
+            "value": item.total_amount,
+            "shop_id": item.shop_id,
+            "invoice_id": item.invoice_id
+        }
+        if days_to_expiry < 0:
+            item_data["status"] = "expired"
+            item_data["expired_days_ago"] = abs(days_to_expiry)
+            expired.append(item_data)
+        elif days_to_expiry <= days_threshold:
+            item_data["status"] = "expiring_soon"
+            expiring_soon.append(item_data)
+        else:
+            item_data["status"] = "safe"
+            safe.append(item_data)
+
+    expired_value = sum(i["value"] for i in expired)
+    expiring_value = sum(i["value"] for i in expiring_soon)
+
+    return {
+        "summary": {
+            "expired_count": len(expired),
+            "expiring_soon_count": len(expiring_soon),
+            "safe_count": len(safe),
+            "expired_value": round(expired_value, 2),
+            "expiring_value": round(expiring_value, 2),
+            "total_at_risk": round(expired_value + expiring_value, 2)
+        },
+        "expired": sorted(expired, key=lambda x: x["expired_days_ago"], reverse=True),
+        "expiring_soon": sorted(expiring_soon, key=lambda x: x["days_to_expiry"]),
+        "safe": safe[:50]
+    }
+
+
+@router.get("/staff/supplier-performance")
+def get_supplier_performance_staff(
+    start_date: Optional[date] = Query(None),
+    end_date: Optional[date] = Query(None),
+    db: Session = Depends(get_db),
+    user_dict: dict = Depends(get_user_dict)
+):
+    """Get supplier performance for staff's shop (ADMIN-VERIFIED INVOICES ONLY)"""
+    from modules.invoice_analyzer_v2.models import PurchaseInvoice
+    from modules.auth.models import Shop
+
+    if user_dict["token_data"].user_type != "staff":
+        raise HTTPException(status_code=403, detail="Staff access required")
+
+    staff = user_dict["user"]
+    shop_code = user_dict["token_data"].shop_code
+    shop = db.query(Shop).filter(
+        Shop.shop_code == shop_code,
+        Shop.organization_id == staff.shop.organization_id
+    ).first()
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+    shop_id = shop.id
+
+    query = db.query(PurchaseInvoice).filter(
+        PurchaseInvoice.shop_id == shop_id,
+        PurchaseInvoice.is_admin_verified == True
+    )
+
+    if start_date:
+        query = query.filter(PurchaseInvoice.invoice_date >= start_date)
+    if end_date:
+        query = query.filter(PurchaseInvoice.invoice_date <= end_date)
+
+    invoices = query.all()
+
+    suppliers = {}
+    for inv in invoices:
+        if inv.supplier_name not in suppliers:
+            suppliers[inv.supplier_name] = {
+                "total_spend": 0,
+                "invoice_count": 0,
+                "total_items": 0,
+                "avg_invoice_value": 0,
+                "total_gst": 0,
+                "first_purchase": inv.invoice_date,
+                "last_purchase": inv.invoice_date
+            }
+        s = suppliers[inv.supplier_name]
+        s["total_spend"] += inv.net_amount
+        s["invoice_count"] += 1
+        s["total_items"] += len(inv.items)
+        s["total_gst"] += inv.total_gst
+        if inv.invoice_date < s["first_purchase"]:
+            s["first_purchase"] = inv.invoice_date
+        if inv.invoice_date > s["last_purchase"]:
+            s["last_purchase"] = inv.invoice_date
+
+    for data in suppliers.values():
+        data["avg_invoice_value"] = round(data["total_spend"] / data["invoice_count"], 2)
+        data["first_purchase"] = data["first_purchase"].isoformat()
+        data["last_purchase"] = data["last_purchase"].isoformat()
+        data["total_spend"] = round(data["total_spend"], 2)
+        data["total_gst"] = round(data["total_gst"], 2)
+
+    sorted_suppliers = sorted(suppliers.items(), key=lambda x: x[1]["total_spend"], reverse=True)
+
+    return {
+        "total_suppliers": len(suppliers),
+        "suppliers": [{"name": name, **data} for name, data in sorted_suppliers]
+    }
+
+
+# NOTE: This route MUST remain last — FastAPI matches routes in order, and /{invoice_id}
+# would shadow any specific GET routes defined after it (e.g. /product-names, /compositions).
+@router.get("/{invoice_id}", response_model=schemas.PurchaseInvoiceResponse)
+def get_invoice(
+    invoice_id: int,
+    db: Session = Depends(get_db),
+    user_dict: dict = Depends(get_user_dict)
+):
+    """Get specific invoice details - accessible by both staff and admin"""
+    from modules.auth.models import Admin, Shop
+
+    user_type = user_dict["token_data"].user_type
+
+    if user_type == "staff":
+        staff = user_dict["user"]
+        shop_code = user_dict["token_data"].shop_code
+
+        if not shop_code:
+            raise HTTPException(status_code=400, detail="Shop code not found in token")
+
+        shop = db.query(Shop).filter(
+            Shop.shop_code == shop_code,
+            Shop.organization_id == staff.shop.organization_id
+        ).first()
+        if not shop:
+            raise HTTPException(status_code=404, detail=f"Shop not found with code: {shop_code}")
+
+        invoice = db.query(models.PurchaseInvoice).filter(
+            models.PurchaseInvoice.id == invoice_id,
+            models.PurchaseInvoice.shop_id == shop.id
+        ).first()
+
+    elif user_type == "admin":
+        admin = user_dict["user"]
+        invoice = db.query(models.PurchaseInvoice).join(Shop).filter(
+            models.PurchaseInvoice.id == invoice_id,
+            Shop.organization_id == admin.organization_id
+        ).first()
+
+    else:
+        raise HTTPException(status_code=403, detail="Staff or Admin access required")
+
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+
+    staff_verified_by_name = None
+    if invoice.staff_verified_by:
+        verifier = db.query(Staff).filter(Staff.id == invoice.staff_verified_by).first()
+        if verifier:
+            staff_verified_by_name = verifier.name
+
+    admin_verified_by_name = None
+    if invoice.admin_verified_by:
+        admin_verifier = db.query(Admin).filter(Admin.id == invoice.admin_verified_by).first()
+        if admin_verifier:
+            admin_verified_by_name = admin_verifier.full_name
+
+    return {
+        "id": invoice.id,
+        "shop_id": invoice.shop_id,
+        "staff_id": invoice.staff_id,
+        "staff_name": invoice.staff_name,
+        "invoice_number": invoice.invoice_number,
+        "invoice_date": invoice.invoice_date,
+        "due_date": invoice.due_date,
+        "supplier_name": invoice.supplier_name,
+        "supplier_address": invoice.supplier_address,
+        "supplier_gstin": invoice.supplier_gstin,
+        "supplier_dl_numbers": invoice.supplier_dl_numbers,
+        "supplier_phone": invoice.supplier_phone,
+        "gross_amount": invoice.gross_amount,
+        "discount_amount": invoice.discount_amount,
+        "taxable_amount": invoice.taxable_amount,
+        "cgst_amount": invoice.cgst_amount,
+        "sgst_amount": invoice.sgst_amount,
+        "igst_amount": invoice.igst_amount,
+        "total_gst": invoice.total_gst,
+        "round_off": invoice.round_off,
+        "net_amount": invoice.net_amount,
+        "pdf_filename": invoice.pdf_filename,
+        "custom_fields": invoice.custom_fields or {},
+        "is_staff_verified": invoice.is_staff_verified,
+        "staff_verified_by_name": staff_verified_by_name,
+        "staff_verified_at": invoice.staff_verified_at,
+        "is_admin_verified": invoice.is_admin_verified,
+        "admin_verified_by_name": admin_verified_by_name,
+        "admin_verified_at": invoice.admin_verified_at,
+        "created_at": invoice.created_at,
+        "items": invoice.items,
+    }

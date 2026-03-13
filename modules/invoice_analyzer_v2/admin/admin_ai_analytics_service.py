@@ -232,6 +232,7 @@ DATA SUMMARY:
 {json.dumps(data, indent=2)}
 
 IMPORTANT FORMATTING RULES:
+- ALL currency values MUST be displayed in Indian Rupees using the ₹ symbol (e.g. ₹45,273.00). Never use $ or any other currency symbol.
 - Use ## for main section headings
 - Use ### for subsections
 - Use **bold** for important metrics, numbers, and key terms

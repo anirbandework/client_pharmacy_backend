@@ -17,7 +17,7 @@ except ImportError:
 
 class BillingAdminAnalytics:
     """AI-powered analytics for billing data using Gemini"""
-    
+
     def __init__(self):
         self.api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
         if self.api_key and GENAI_AVAILABLE:
@@ -30,28 +30,28 @@ class BillingAdminAnalytics:
                 self.model = None
         else:
             self.model = None
-    
+
     def generate_comprehensive_analysis(
-        self, 
-        db: Session, 
+        self,
+        db: Session,
         organization_id: str,
         shop_id: int = None,
         days: int = 30
     ) -> Dict[str, Any]:
         """Generate comprehensive AI analysis of billing data"""
-        
+
         if not self.model:
             return {
                 "error": "AI analytics unavailable. Please configure GEMINI_API_KEY."
             }
-        
+
         data = self._gather_billing_data(db, organization_id, shop_id, days)
-        
+
         try:
             prompt = self._build_analysis_prompt(data)
             response = self.model.generate_content(prompt)
             ai_insights = response.text
-            
+
             return {
                 "insights": ai_insights,
                 "data_summary": data,
@@ -63,33 +63,31 @@ class BillingAdminAnalytics:
                 "error": f"AI analysis failed: {str(e)}",
                 "data_summary": data
             }
-    
+
     def _gather_billing_data(
-        self, 
-        db: Session, 
+        self,
+        db: Session,
         organization_id: str,
         shop_id: int = None,
         days: int = 30
     ) -> Dict[str, Any]:
         """Gather comprehensive billing data for analysis"""
-        from modules.billing.models import Bill, BillItem
-        from modules.billing.daily_records_models import DailyRecord, DailyExpense
+        from modules.billing_v2.models import Bill, BillItem
+        from modules.billing_v2.daily_records_models import DailyRecord, DailyExpense
         from modules.auth.models import Shop
-        
+
         cutoff_date = datetime.now() - timedelta(days=days)
-        
-        # Base query
+
         query = db.query(Bill).join(Shop).filter(
             Shop.organization_id == organization_id,
             Bill.created_at >= cutoff_date
         )
-        
+
         if shop_id:
             query = query.filter(Bill.shop_id == shop_id)
-        
+
         bills = query.all()
-        
-        # Calculate metrics
+
         total_bills = len(bills)
         total_revenue = sum(b.total_amount for b in bills)
         cash_sales = sum(b.cash_amount for b in bills)
@@ -97,8 +95,7 @@ class BillingAdminAnalytics:
         online_sales = sum(b.online_amount for b in bills)
         total_discount = sum(b.discount_amount for b in bills)
         total_tax = sum(b.tax_amount for b in bills)
-        
-        # Daily breakdown with payment methods
+
         daily_sales = {}
         for bill in bills:
             day = bill.created_at.date()
@@ -109,8 +106,7 @@ class BillingAdminAnalytics:
             daily_sales[day]["cash"] += bill.cash_amount
             daily_sales[day]["card"] += bill.card_amount
             daily_sales[day]["online"] += bill.online_amount
-        
-        # Hourly distribution
+
         hourly_sales = {}
         for bill in bills:
             hour = bill.created_at.hour
@@ -118,8 +114,7 @@ class BillingAdminAnalytics:
                 hourly_sales[hour] = {"bills": 0, "revenue": 0}
             hourly_sales[hour]["bills"] += 1
             hourly_sales[hour]["revenue"] += bill.total_amount
-        
-        # Top selling items
+
         top_items = db.query(
             BillItem.item_name,
             func.sum(BillItem.quantity).label('total_qty'),
@@ -130,50 +125,47 @@ class BillingAdminAnalytics:
             Shop.organization_id == organization_id,
             Bill.created_at >= cutoff_date
         )
-        
+
         if shop_id:
             top_items = top_items.filter(Bill.shop_id == shop_id)
-        
+
         top_items = top_items.group_by(BillItem.item_name).order_by(
             func.sum(BillItem.total_price).desc()
         ).limit(20).all()
-        
-        # Expenses
+
         expense_query = db.query(DailyExpense).join(DailyRecord).join(Shop).filter(
             Shop.organization_id == organization_id,
             DailyExpense.created_at >= cutoff_date
         )
-        
+
         if shop_id:
             expense_query = expense_query.filter(DailyExpense.shop_id == shop_id)
-        
+
         expenses = expense_query.all()
         total_expenses = sum(e.amount for e in expenses)
-        
+
         expense_breakdown = {}
         daily_expenses = {}
         for exp in expenses:
             if exp.expense_category not in expense_breakdown:
                 expense_breakdown[exp.expense_category] = 0
             expense_breakdown[exp.expense_category] += exp.amount
-            
+
             day = exp.created_at.date()
             if day not in daily_expenses:
                 daily_expenses[day] = 0
             daily_expenses[day] += exp.amount
-        
-        # Customer insights (basic counts only)
+
         customer_bills = {}
         for bill in bills:
             if bill.customer_phone:
                 if bill.customer_phone not in customer_bills:
                     customer_bills[bill.customer_phone] = {"count": 0}
                 customer_bills[bill.customer_phone]["count"] += 1
-        
+
         unique_customers = len(customer_bills)
         repeat_customers = len([p for p, d in customer_bills.items() if d["count"] > 1])
-        
-        # Bill value distribution
+
         bill_ranges = {"0-500": 0, "500-1000": 0, "1000-2000": 0, "2000-5000": 0, "5000+": 0}
         for bill in bills:
             amt = bill.total_amount
@@ -187,7 +179,7 @@ class BillingAdminAnalytics:
                 bill_ranges["2000-5000"] += 1
             else:
                 bill_ranges["5000+"] += 1
-        
+
         return {
             "period": {
                 "days": days,
@@ -253,10 +245,10 @@ class BillingAdminAnalytics:
             ],
             "bill_value_distribution": [{"range": k, "count": v} for k, v in bill_ranges.items()]
         }
-    
+
     def _build_analysis_prompt(self, data: Dict[str, Any]) -> str:
         """Build comprehensive analysis prompt for AI"""
-        
+
         return f"""
 You are a pharmaceutical retail business analyst. Analyze this billing data and provide actionable insights.
 
