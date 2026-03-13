@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from app.database.database import get_db
@@ -179,7 +179,7 @@ def add_stock_item(
     db.refresh(db_item)
     return db_item
 
-@router.get("/items", response_model=List[schemas.StockItem])
+@router.get("/items")
 def get_stock_items(
     section_id: Optional[int] = None,
     rack_id: Optional[int] = None,
@@ -189,15 +189,15 @@ def get_stock_items(
     manufacturer: Optional[str] = None,
     expiry_before: Optional[date] = None,
     expiry_after: Optional[date] = None,
-    skip: int = 0,
-    limit: int = 1000,
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=1000),
     db: Session = Depends(get_db),
     current_user: tuple = Depends(get_current_user)
 ):
-    """Get stock items with filters"""
+    """Get stock items with filters and pagination"""
     staff, shop_id = current_user
     query = db.query(models.StockItem).filter(models.StockItem.shop_id == shop_id)
-    
+
     if section_id:
         query = query.filter(models.StockItem.section_id == section_id)
     if rack_id:
@@ -214,13 +214,10 @@ def get_stock_items(
         query = query.filter(models.StockItem.expiry_date <= expiry_before)
     if expiry_after:
         query = query.filter(models.StockItem.expiry_date >= expiry_after)
-    
-    items = query.offset(skip).limit(limit).all()
-    
-    # Sort alphabetically by product_name
-    items = sorted(items, key=lambda x: x.product_name.lower())
-    
-    # Add section and rack names
+
+    total = query.count()
+    items = query.order_by(models.StockItem.product_name).offset((page - 1) * per_page).limit(per_page).all()
+
     result = []
     for item in items:
         item_dict = {
@@ -230,8 +227,15 @@ def get_stock_items(
             "total_value": (item.quantity_software * item.unit_price) if item.unit_price else None
         }
         result.append(item_dict)
-    
-    return result
+
+    import math
+    return {
+        "items": result,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "pages": math.ceil(total / per_page) if total > 0 else 1
+    }
 
 @router.get("/items/{item_id}", response_model=schemas.StockItem)
 def get_stock_item(
@@ -326,7 +330,7 @@ def bulk_delete_items(
 @router.post("/items/upload-excel")
 async def upload_stock_excel(
     file: UploadFile = File(...),
-    notes: Optional[str] = None,
+    notes: Optional[str] = Form(None),
     db: Session = Depends(get_db),
     current_user: tuple = Depends(get_current_user)
 ):
@@ -341,13 +345,13 @@ async def upload_stock_excel(
         wb = load_workbook(BytesIO(contents))
         ws = wb.active
         
-        # Create upload record
+        # Create upload record with notes
         upload = models.ExcelUpload(
             shop_id=shop_id,
             filename=file.filename,
             uploaded_by_staff_id=staff.id,
             uploaded_by_staff_name=staff.name,
-            upload_notes=notes
+            upload_notes=notes if notes and notes.strip() else None
         )
         db.add(upload)
         db.flush()  # Get upload ID
@@ -456,18 +460,30 @@ async def upload_stock_excel(
 @router.get("/uploads")
 def get_excel_uploads(
     status: Optional[str] = None,
+    search: Optional[str] = None,
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
     current_user: tuple = Depends(get_current_user)
 ):
-    """Get Excel uploads with optional status filter"""
+    """Get Excel uploads with optional status filter, search and pagination"""
     staff, shop_id = current_user
     query = db.query(models.ExcelUpload).filter(models.ExcelUpload.shop_id == shop_id)
-    
+
     if status:
         query = query.filter(models.ExcelUpload.status == status)
     
-    uploads = query.order_by(models.ExcelUpload.uploaded_at.desc()).all()
-    
+    if search:
+        search_term = f"%{search}%"
+        query = query.filter(
+            (models.ExcelUpload.filename.ilike(search_term)) |
+            (models.ExcelUpload.uploaded_by_staff_name.ilike(search_term))
+        )
+
+    import math
+    total = query.count()
+    uploads = query.order_by(models.ExcelUpload.uploaded_at.desc()).offset((page - 1) * per_page).limit(per_page).all()
+
     result = []
     for upload in uploads:
         result.append({
@@ -490,8 +506,14 @@ def get_excel_uploads(
             "admin_notes": upload.admin_notes,
             "rejection_reason": upload.rejection_reason
         })
-    
-    return result
+
+    return {
+        "items": result,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "pages": math.ceil(total / per_page) if total > 0 else 1
+    }
 
 @router.get("/uploads/{upload_id}/items")
 def get_upload_items(
@@ -545,7 +567,17 @@ def get_upload_items(
             "filename": upload.filename,
             "uploaded_by": upload.uploaded_by_staff_name,
             "uploaded_at": upload.uploaded_at,
-            "status": upload.status
+            "status": upload.status,
+            "upload_notes": upload.upload_notes,
+            "staff_notes": upload.staff_notes,
+            "admin_notes": upload.admin_notes,
+            "staff_verified": upload.staff_verified,
+            "staff_verified_by": upload.staff_verified_by_name,
+            "staff_verified_at": upload.staff_verified_at,
+            "admin_verified": upload.admin_verified,
+            "admin_verified_by": upload.admin_verified_by_name,
+            "admin_verified_at": upload.admin_verified_at,
+            "rejection_reason": upload.rejection_reason
         },
         "items": result
     }
@@ -592,9 +624,11 @@ def update_upload_item(
                             setattr(item, key, float(value) if value else None)
                     except (ValueError, TypeError):
                         setattr(item, key, None)
+            elif key in ['expiry_date', 'manufacturing_date']:
+                setattr(item, key, value if value else None)
             else:
                 setattr(item, key, value)
-    
+
     # Mark as modified
     if upload.status == "pending_staff_verification":
         item.modified_by_staff = True
@@ -651,8 +685,7 @@ def staff_verify_upload(
     if not upload:
         raise HTTPException(status_code=404, detail="Upload not found")
     
-    # Debug: Check current status
-    print(f"Current upload status: {upload.status}")
+    # Validate current status
     
     if upload.status != "pending_staff_verification":
         raise HTTPException(status_code=400, detail=f"Upload status is '{upload.status}', expected 'pending_staff_verification'")
@@ -796,24 +829,24 @@ def delete_upload(
     db.commit()
     return {"message": "Upload and associated data deleted successfully"}
 
-@router.get("/items/unassigned/list", response_model=List[schemas.StockItem])
+@router.get("/items/unassigned/list")
 def get_unassigned_items(
     item_name: Optional[str] = None,
     composition: Optional[str] = None,
     manufacturer: Optional[str] = None,
     batch_number: Optional[str] = None,
-    skip: int = 0,
-    limit: int = 1000,
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
     current_user: tuple = Depends(get_current_user)
 ):
-    """Get stock items without assigned rack/section with search and filters"""
+    """Get unassigned stock items with search, filters and pagination"""
     staff, shop_id = current_user
     query = db.query(models.StockItem).filter(
         models.StockItem.shop_id == shop_id,
         models.StockItem.section_id.is_(None)
     )
-    
+
     if item_name:
         query = query.filter(models.StockItem.product_name.ilike(f"%{item_name}%"))
     if composition:
@@ -822,12 +855,10 @@ def get_unassigned_items(
         query = query.filter(models.StockItem.manufacturer.ilike(f"%{manufacturer}%"))
     if batch_number:
         query = query.filter(models.StockItem.batch_number.ilike(f"%{batch_number}%"))
-    
-    items = query.offset(skip).limit(limit).all()
-    
-    # Sort alphabetically by product_name
-    items = sorted(items, key=lambda x: x.product_name.lower())
-    
+
+    total = query.count()
+    items = query.order_by(models.StockItem.product_name).offset((page - 1) * per_page).limit(per_page).all()
+
     result = []
     for item in items:
         item_dict = {
@@ -837,8 +868,15 @@ def get_unassigned_items(
             "total_value": (item.quantity_software * item.unit_price) if item.unit_price else None
         }
         result.append(item_dict)
-    
-    return result
+
+    import math
+    return {
+        "items": result,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "pages": math.ceil(total / per_page) if total > 0 else 1
+    }
 
 @router.patch("/items/{item_id}/assign-section")
 def assign_section_to_item(
@@ -901,28 +939,37 @@ def add_purchase(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@router.get("/purchases", response_model=List[schemas.Purchase])
+@router.get("/purchases")
 def get_purchases(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     supplier_name: Optional[str] = None,
-    skip: int = 0,
-    limit: int = 50,
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
     current_user: tuple = Depends(get_current_user)
 ):
-    """Get purchases with filters"""
+    """Get purchases with filters and pagination"""
     staff, shop_id = current_user
     query = db.query(models.Purchase).filter(models.Purchase.shop_id == shop_id)
-    
+
     if start_date:
         query = query.filter(models.Purchase.purchase_date >= start_date)
     if end_date:
         query = query.filter(models.Purchase.purchase_date <= end_date)
     if supplier_name:
         query = query.filter(models.Purchase.supplier_name.ilike(f"%{supplier_name}%"))
-    
-    return query.order_by(models.Purchase.purchase_date.desc()).offset(skip).limit(limit).all()
+
+    import math
+    total = query.count()
+    items = query.order_by(models.Purchase.purchase_date.desc()).offset((page - 1) * per_page).limit(per_page).all()
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "pages": math.ceil(total / per_page) if total > 0 else 1
+    }
 
 @router.put("/purchases/{purchase_id}", response_model=schemas.Purchase)
 def update_purchase(
@@ -990,28 +1037,37 @@ def add_sale(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@router.get("/sales", response_model=List[schemas.Sale])
+@router.get("/sales")
 def get_sales(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     customer_phone: Optional[str] = None,
-    skip: int = 0,
-    limit: int = 50,
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
     current_user: tuple = Depends(get_current_user)
 ):
-    """Get sales with filters"""
+    """Get sales with filters and pagination"""
     staff, shop_id = current_user
     query = db.query(models.Sale).filter(models.Sale.shop_id == shop_id)
-    
+
     if start_date:
         query = query.filter(models.Sale.sale_date >= start_date)
     if end_date:
         query = query.filter(models.Sale.sale_date <= end_date)
     if customer_phone:
         query = query.filter(models.Sale.customer_phone == customer_phone)
-    
-    return query.order_by(models.Sale.sale_date.desc()).offset(skip).limit(limit).all()
+
+    import math
+    total = query.count()
+    items = query.order_by(models.Sale.sale_date.desc()).offset((page - 1) * per_page).limit(per_page).all()
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "pages": math.ceil(total / per_page) if total > 0 else 1
+    }
 
 @router.put("/sales/{sale_id}", response_model=schemas.Sale)
 def update_sale(
@@ -1101,16 +1157,46 @@ def audit_stock_item(
 @router.get("/audit/discrepancies")
 def get_stock_discrepancies(
     threshold: int = Query(0, description="Minimum discrepancy threshold"),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
     current_user: tuple = Depends(get_current_user)
 ):
-    """Get all stock discrepancies above threshold"""
+    """Get all stock discrepancies above threshold (paginated)"""
     staff, shop_id = current_user
-    discrepancies = services.StockAuditService.get_discrepancies(db, threshold, shop_id)
+    
+    query = db.query(models.StockItem).join(models.StockSection).join(models.StockRack).filter(
+        models.StockItem.quantity_physical.isnot(None),
+        func.abs(models.StockItem.audit_discrepancy) > threshold,
+        models.StockItem.shop_id == shop_id
+    )
+    
+    total = query.count()
+    items = query.order_by(func.abs(models.StockItem.audit_discrepancy).desc()).offset((page - 1) * per_page).limit(per_page).all()
+    
+    discrepancies = []
+    for item in items:
+        discrepancies.append({
+            "item": item,
+            "software_qty": item.quantity_software,
+            "physical_qty": item.quantity_physical,
+            "difference": item.audit_discrepancy,
+            "section_name": item.section.section_name,
+            "rack_number": item.section.rack.rack_number,
+            "last_audit_date": item.last_audit_date,
+            "audited_by_staff_id": item.last_audit_by_staff_id,
+            "audited_by_staff_name": item.last_audit_by_staff_name
+        })
+    
+    import math
     return {
-        "total_discrepancies": len(discrepancies),
+        "total_discrepancies": total,
         "threshold": threshold,
-        "discrepancies": discrepancies
+        "discrepancies": discrepancies,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "pages": math.ceil(total / per_page) if total > 0 else 1
     }
 
 @router.get("/audit/summary")
@@ -1155,11 +1241,13 @@ def get_item_stock_calculation(
     calculated_stock = services.StockCalculationService.calculate_software_stock(db, item_id)
     
     purchases = db.query(models.PurchaseItem).filter(
-        models.PurchaseItem.stock_item_id == item_id
+        models.PurchaseItem.stock_item_id == item_id,
+        models.PurchaseItem.shop_id == shop_id
     ).all()
-    
+
     sales = db.query(models.SaleItem).filter(
-        models.SaleItem.stock_item_id == item_id
+        models.SaleItem.stock_item_id == item_id,
+        models.SaleItem.shop_id == shop_id
     ).all()
     
     total_purchased = sum(p.quantity for p in purchases)
@@ -1180,31 +1268,35 @@ def get_item_stock_calculation(
 @router.get("/reports/low-stock")
 def get_low_stock_report(
     threshold: int = Query(10, description="Low stock threshold"),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
     current_user: tuple = Depends(get_current_user)
 ):
-    """Get low stock items report"""
+    """Get low stock items report (paginated)"""
     staff, shop_id = current_user
-    items = services.StockReportService.get_low_stock_items(db, threshold, shop_id)
+    result = services.StockReportService.get_low_stock_items(db, threshold, shop_id, page, per_page)
     return {
         "threshold": threshold,
-        "total_low_stock_items": len(items),
-        "items": items
+        "total_low_stock_items": result["total"],
+        **result
     }
 
 @router.get("/reports/expiring")
 def get_expiring_items_report(
     days_ahead: int = Query(30, description="Days ahead to check for expiry"),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
     current_user: tuple = Depends(get_current_user)
 ):
-    """Get expiring items report"""
+    """Get expiring items report (paginated)"""
     staff, shop_id = current_user
-    items = services.StockReportService.get_expiring_items(db, days_ahead, shop_id)
+    result = services.StockReportService.get_expiring_items(db, days_ahead, shop_id, page, per_page)
     return {
         "days_ahead": days_ahead,
-        "total_expiring_items": len(items),
-        "items": items
+        "total_expiring_items": result["total"],
+        **result
     }
 
 @router.get("/reports/stock-movement")
@@ -1249,25 +1341,34 @@ def create_stock_adjustment(
     db.refresh(db_adjustment)
     return db_adjustment
 
-@router.get("/adjustments", response_model=List[schemas.StockAdjustment])
+@router.get("/adjustments")
 def get_stock_adjustments(
     stock_item_id: Optional[int] = None,
     adjustment_type: Optional[str] = None,
-    skip: int = 0,
-    limit: int = 50,
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
     current_user: tuple = Depends(get_current_user)
 ):
-    """Get stock adjustments with filters"""
+    """Get stock adjustments with filters and pagination"""
     staff, shop_id = current_user
     query = db.query(models.StockAdjustment).filter(models.StockAdjustment.shop_id == shop_id)
-    
+
     if stock_item_id:
         query = query.filter(models.StockAdjustment.stock_item_id == stock_item_id)
     if adjustment_type:
         query = query.filter(models.StockAdjustment.adjustment_type == adjustment_type)
-    
-    return query.order_by(models.StockAdjustment.adjustment_date.desc()).offset(skip).limit(limit).all()
+
+    import math
+    total = query.count()
+    items = query.order_by(models.StockAdjustment.adjustment_date.desc()).offset((page - 1) * per_page).limit(per_page).all()
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "pages": math.ceil(total / per_page) if total > 0 else 1
+    }
 
 # AI ANALYTICS
 
@@ -1418,7 +1519,7 @@ def export_audit_records_excel(
     
     for row, record in enumerate(records, 2):
         ws.cell(row=row, column=1, value=record.id)
-        ws.cell(row=row, column=2, value=record.stock_item.item_name if record.stock_item else "")
+        ws.cell(row=row, column=2, value=record.stock_item.product_name if record.stock_item else "")
         ws.cell(row=row, column=3, value=record.stock_item.batch_number if record.stock_item else "")
         ws.cell(row=row, column=4, value=record.stock_item.section.rack.rack_number if record.stock_item and record.stock_item.section and record.stock_item.section.rack else "")
         ws.cell(row=row, column=5, value=record.stock_item.section.section_name if record.stock_item and record.stock_item.section else "")
@@ -1483,7 +1584,7 @@ def export_adjustments_excel(
     
     for row, adj in enumerate(adjustments, 2):
         ws.cell(row=row, column=1, value=adj.id)
-        ws.cell(row=row, column=2, value=adj.stock_item.item_name if adj.stock_item else "")
+        ws.cell(row=row, column=2, value=adj.stock_item.product_name if adj.stock_item else "")
         ws.cell(row=row, column=3, value=adj.stock_item.batch_number if adj.stock_item else "")
         ws.cell(row=row, column=4, value=adj.stock_item.section.rack.rack_number if adj.stock_item and adj.stock_item.section and adj.stock_item.section.rack else "")
         ws.cell(row=row, column=5, value=adj.stock_item.section.section_name if adj.stock_item and adj.stock_item.section else "")

@@ -274,17 +274,28 @@ class StockAuditService:
 class StockReportService:
     
     @staticmethod
-    def get_low_stock_items(db: Session, threshold: int = 10, shop_id: int = None) -> List[StockItem]:
-        """Get items with low stock"""
+    def get_low_stock_items(db: Session, threshold: int = 10, shop_id: int = None, page: int = 1, per_page: int = 50) -> Dict[str, Any]:
+        """Get items with low stock (paginated)"""
         
         query = db.query(StockItem).filter(StockItem.quantity_software <= threshold)
         if shop_id:
             query = query.filter(StockItem.shop_id == shop_id)
-        return query.all()
+        
+        total = query.count()
+        items = query.order_by(StockItem.quantity_software.asc()).offset((page - 1) * per_page).limit(per_page).all()
+        
+        import math
+        return {
+            "items": items,
+            "total": total,
+            "page": page,
+            "per_page": per_page,
+            "pages": math.ceil(total / per_page) if total > 0 else 1
+        }
     
     @staticmethod
-    def get_expiring_items(db: Session, days_ahead: int = 30, shop_id: int = None) -> List[StockItem]:
-        """Get items expiring within specified days"""
+    def get_expiring_items(db: Session, days_ahead: int = 30, shop_id: int = None, page: int = 1, per_page: int = 50) -> Dict[str, Any]:
+        """Get items expiring within specified days (paginated)"""
         
         cutoff_date = date.today() + timedelta(days=days_ahead)
         
@@ -295,7 +306,18 @@ class StockReportService:
         )
         if shop_id:
             query = query.filter(StockItem.shop_id == shop_id)
-        return query.all()
+        
+        total = query.count()
+        items = query.order_by(StockItem.expiry_date.asc()).offset((page - 1) * per_page).limit(per_page).all()
+        
+        import math
+        return {
+            "items": items,
+            "total": total,
+            "page": page,
+            "per_page": per_page,
+            "pages": math.ceil(total / per_page) if total > 0 else 1
+        }
     
     @staticmethod
     def get_stock_movement_report(db: Session, start_date: date, end_date: date, shop_id: int = None) -> Dict[str, Any]:

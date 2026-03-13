@@ -41,14 +41,14 @@ class StockAuditAnalytics:
     def _get_stock_overview(stock_items: List) -> Dict[str, Any]:
         """Overall stock statistics"""
         total_items = len(stock_items)
-        total_software_qty = sum(item.quantity_software for item in stock_items)
-        total_physical_qty = sum(item.quantity_physical for item in stock_items if item.quantity_physical is not None)
-        
-        items_with_discrepancy = [item for item in stock_items if item.audit_discrepancy != 0]
+        total_software_qty = sum((item.quantity_software or 0) for item in stock_items)
+        total_physical_qty = sum((item.quantity_physical or 0) for item in stock_items if item.quantity_physical is not None)
+
+        items_with_discrepancy = [item for item in stock_items if (item.audit_discrepancy or 0) != 0]
         items_audited = [item for item in stock_items if item.last_audit_date is not None]
         items_not_audited = [item for item in stock_items if item.last_audit_date is None]
-        
-        total_value = sum((item.quantity_software * item.unit_price) for item in stock_items if item.unit_price)
+
+        total_value = sum(((item.quantity_software or 0) * item.unit_price) for item in stock_items if item.unit_price)
         
         return {
             "total_items": total_items,
@@ -67,14 +67,15 @@ class StockAuditAnalytics:
         discrepancies = []
         
         for item in stock_items:
-            if item.audit_discrepancy != 0:
+            disc = item.audit_discrepancy or 0
+            if disc != 0:
                 discrepancies.append({
                     "product_name": item.product_name,
                     "batch_number": item.batch_number,
-                    "software_qty": item.quantity_software,
+                    "software_qty": item.quantity_software or 0,
                     "physical_qty": item.quantity_physical,
-                    "discrepancy": item.audit_discrepancy,
-                    "value_impact": round((item.audit_discrepancy * item.unit_price), 2) if item.unit_price else 0,
+                    "discrepancy": disc,
+                    "value_impact": round((disc * item.unit_price), 2) if item.unit_price else 0,
                     "last_audit": item.last_audit_date.isoformat() if item.last_audit_date else None
                 })
         
@@ -162,7 +163,7 @@ class StockAuditAnalytics:
             if not item.unit_price:
                 continue
             
-            item_value = item.quantity_software * item.unit_price
+            item_value = (item.quantity_software or 0) * item.unit_price
             
             for min_val, max_val, label in value_ranges:
                 if min_val <= item_value < max_val:
