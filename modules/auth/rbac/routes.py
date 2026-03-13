@@ -103,6 +103,59 @@ def update_module_permission(
         "permission": permission
     }
 
+@router.get("/organization/{organization_id}/module/{module_key}/tabs")
+def get_module_tabs(
+    organization_id: str,
+    module_key: str,
+    super_admin: SuperAdmin = Depends(get_current_super_admin),
+    db: Session = Depends(get_db)
+):
+    """Get tab permissions for a module in an organization (SuperAdmin only)"""
+    tab_defs = service.models.MODULE_TABS.get(module_key, [])
+    if not tab_defs:
+        raise HTTPException(status_code=404, detail="No tabs defined for this module")
+
+    tab_perms = service.RBACService.get_tab_permissions(db, organization_id, module_key)
+
+    return schemas.ModuleTabsResponse(
+        module_key=module_key,
+        tabs=[
+            schemas.TabPermission(
+                tab_key=t["tab_key"],
+                tab_label=t["tab_label"],
+                enabled=tab_perms.get(t["tab_key"], True)
+            )
+            for t in tab_defs
+        ]
+    )
+
+
+@router.put("/organization/{organization_id}/module/{module_key}/tab/{tab_key}")
+def update_tab_permission(
+    organization_id: str,
+    module_key: str,
+    tab_key: str,
+    data: schemas.TabPermissionUpdate,
+    super_admin: SuperAdmin = Depends(get_current_super_admin),
+    db: Session = Depends(get_db)
+):
+    """Update a single tab permission for an organization (SuperAdmin only)"""
+    tab_defs = service.models.MODULE_TABS.get(module_key, [])
+    valid_keys = {t["tab_key"] for t in tab_defs}
+    if tab_key not in valid_keys:
+        raise HTTPException(status_code=404, detail="Tab not found in module")
+
+    service.RBACService.update_tab_permission(
+        db=db,
+        organization_id=organization_id,
+        module_key=module_key,
+        tab_key=tab_key,
+        enabled=data.enabled,
+        configured_by=super_admin.full_name
+    )
+    return {"message": "Tab permission updated", "tab_key": tab_key, "enabled": data.enabled}
+
+
 @router.post("/organization/{organization_id}/reset-defaults")
 def reset_to_defaults(
     organization_id: str,
