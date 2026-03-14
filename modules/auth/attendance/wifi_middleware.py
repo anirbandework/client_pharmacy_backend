@@ -15,14 +15,13 @@ class WiFiEnforcementMiddleware(BaseHTTPMiddleware):
     """
     Middleware to enforce WiFi requirement for staff accessing protected modules.
     
-    Protected modules: stock_audit, billing, profit_analysis, customer_tracking
+    Protected modules: stock_audit, billing, customer_tracking
     Exempt modules: auth, attendance, notifications, feedback
     """
     
     PROTECTED_MODULES = [
         "/api/stock-audit",
         "/api/billing",
-        "/api/profit",
         "/api/customer-tracking",
         "/api/purchase-invoices"
     ]

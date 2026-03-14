@@ -94,6 +94,30 @@ MODULE_TABS = {
         {"tab_key": "requests", "tab_label": "Staff Requests"},
     ],
 
+    # ── STAFF MODULE ──────────────────────────────────────────────────────────
+    # Billing (staff): /billing
+    "billing": [
+        {"tab_key": "create",    "tab_label": "New Bill"},
+        {"tab_key": "history",   "tab_label": "Bill History"},
+        {"tab_key": "reports",   "tab_label": "Reports"},
+        {"tab_key": "daily",     "tab_label": "Daily Records"},
+        {"tab_key": "config",    "tab_label": "Bill Config"},
+        {"tab_key": "dashboard", "tab_label": "Dashboard"},
+        {"tab_key": "profit",    "tab_label": "Profit Analysis"},
+    ],
+
+    # ── ADMIN MODULE ──────────────────────────────────────────────────────────
+    # Billing Analytics (admin): /billing-analytics
+    "billing_analytics": [
+        {"tab_key": "analytics", "tab_label": "Analytics"},
+        {"tab_key": "insights",  "tab_label": "AI Insights"},
+        {"tab_key": "history",   "tab_label": "Bill History"},
+        {"tab_key": "reports",   "tab_label": "Reports"},
+        {"tab_key": "dashboard", "tab_label": "Dashboard"},
+        {"tab_key": "config",    "tab_label": "Bill Config"},
+        {"tab_key": "profit",    "tab_label": "Profit Analysis"},
+    ],
+
     # ── ADMIN MODULE ──────────────────────────────────────────────────────────
     # Stock Analytics (admin): /stock-analytics
     "stock_analytics": [

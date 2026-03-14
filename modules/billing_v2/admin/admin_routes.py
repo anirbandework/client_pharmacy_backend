@@ -8,6 +8,8 @@ from typing import Optional
 from datetime import datetime, date, timedelta
 from io import BytesIO
 import json, math
+from collections import defaultdict
+from modules.billing_v2.daily_records_models import DailyRecord, DailyExpense
 from pydantic import BaseModel
 from modules.auth.dependencies import get_current_admin
 from modules.billing_v2 import models
@@ -308,3 +310,292 @@ def export_admin_bills_excel(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
+
+# ─── PROFIT ANALYSIS ──────────────────────────────────────────────────────────
+
+@router.get("/admin/profit-analysis")
+def get_admin_profit_analysis(
+    shop_id: Optional[int] = Query(None),
+    days: int = Query(30, le=365),
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    search: Optional[str] = None,
+    db: Session = Depends(get_db),
+    admin: Admin = Depends(get_current_admin)
+):
+    """Comprehensive profit & loss analysis for admin (org-scoped, optional shop filter)"""
+    cache_key = f"billing_admin_profit:{admin.organization_id}:{shop_id or 'all'}:{days}:{start_date}:{end_date}"
+    if not search:
+        cached = dashboard_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+    e_date = end_date or date.today()
+    s_date = start_date or (e_date - timedelta(days=days))
+
+    # ── Base bill query (org-scoped) ─────────────────────────────────
+    bill_q = (
+        db.query(models.Bill)
+        .join(Shop, models.Bill.shop_id == Shop.id)
+        .filter(
+            Shop.organization_id == admin.organization_id,
+            models.Bill.created_at >= datetime.combine(s_date, datetime.min.time()),
+            models.Bill.created_at <= datetime.combine(e_date, datetime.max.time())
+        )
+    )
+    if shop_id:
+        bill_q = bill_q.filter(models.Bill.shop_id == shop_id)
+    if search:
+        bill_q = bill_q.filter(
+            (models.Bill.customer_name.ilike(f'%{search}%')) |
+            (models.Bill.customer_phone.ilike(f'%{search}%')) |
+            (models.Bill.bill_number.ilike(f'%{search}%'))
+        )
+    bills = bill_q.order_by(models.Bill.created_at.desc()).all()
+
+    # ── Revenue metrics ──────────────────────────────────────────────
+    total_revenue = sum(b.total_amount for b in bills)
+    total_discounts = sum(b.discount_amount for b in bills)
+    total_tax = sum(b.tax_amount for b in bills)
+    cash_total = sum(b.cash_amount for b in bills)
+    card_total = sum(b.card_amount for b in bills)
+    online_total = sum(b.online_amount for b in bills)
+
+    # ── Expenses ─────────────────────────────────────────────────────
+    record_q = (
+        db.query(DailyRecord)
+        .join(Shop, DailyRecord.shop_id == Shop.id)
+        .filter(
+            Shop.organization_id == admin.organization_id,
+            DailyRecord.record_date >= s_date,
+            DailyRecord.record_date <= e_date
+        )
+    )
+    if shop_id:
+        record_q = record_q.filter(DailyRecord.shop_id == shop_id)
+    records = record_q.all()
+    total_expenses = sum(r.total_expenses for r in records)
+    net_profit = total_revenue - total_expenses
+    profit_margin = round(net_profit / total_revenue * 100, 2) if total_revenue > 0 else 0
+
+    # ── Daily P&L trend ──────────────────────────────────────────────
+    record_map = defaultdict(float)
+    for r in records:
+        record_map[r.record_date] += r.total_expenses
+
+    daily_revenue = defaultdict(float)
+    daily_bills_cnt = defaultdict(int)
+    daily_discounts_map = defaultdict(float)
+    for b in bills:
+        d = b.created_at.date()
+        daily_revenue[d] += b.total_amount
+        daily_bills_cnt[d] += 1
+        daily_discounts_map[d] += b.discount_amount
+
+    all_dates = sorted(set(list(daily_revenue.keys()) + list(record_map.keys())))
+    daily_pnl = []
+    for d in all_dates:
+        rev = daily_revenue.get(d, 0)
+        exp = record_map.get(d, 0)
+        profit = rev - exp
+        daily_pnl.append({
+            "date": str(d),
+            "day": d.strftime('%a'),
+            "revenue": round(rev, 2),
+            "expenses": round(exp, 2),
+            "net_profit": round(profit, 2),
+            "profit_margin": round(profit / rev * 100 if rev > 0 else 0, 2),
+            "bills": daily_bills_cnt.get(d, 0),
+            "discounts": round(daily_discounts_map.get(d, 0), 2)
+        })
+
+    # ── Expense breakdown ────────────────────────────────────────────
+    exp_q = (
+        db.query(DailyExpense.expense_category, func.sum(DailyExpense.amount).label('total'))
+        .join(DailyRecord)
+        .join(Shop, DailyRecord.shop_id == Shop.id)
+        .filter(
+            Shop.organization_id == admin.organization_id,
+            DailyRecord.record_date >= s_date,
+            DailyRecord.record_date <= e_date
+        )
+    )
+    if shop_id:
+        exp_q = exp_q.filter(DailyRecord.shop_id == shop_id)
+    expense_cats = exp_q.group_by(DailyExpense.expense_category).all()
+
+    expense_breakdown = [
+        {
+            "category": e[0],
+            "amount": round(float(e[1]), 2),
+            "percentage": round(float(e[1]) / total_expenses * 100 if total_expenses > 0 else 0, 2)
+        }
+        for e in expense_cats
+    ]
+
+    # ── Payment split ────────────────────────────────────────────────
+    payment_base = (cash_total + card_total + online_total) or total_revenue or 1
+    payment_split = {
+        "cash": round(cash_total, 2),
+        "card": round(card_total, 2),
+        "online": round(online_total, 2),
+        "cash_pct": round(cash_total / payment_base * 100, 2),
+        "card_pct": round(card_total / payment_base * 100, 2),
+        "online_pct": round(online_total / payment_base * 100, 2)
+    }
+
+    # ── Top items by revenue ─────────────────────────────────────────
+    top_items_q = (
+        db.query(
+            models.BillItem.item_name,
+            func.sum(models.BillItem.quantity).label('total_quantity'),
+            func.sum(models.BillItem.total_price).label('total_revenue'),
+            func.avg(models.BillItem.discount_percent).label('avg_discount'),
+            func.count(models.BillItem.id).label('transaction_count')
+        )
+        .join(models.Bill)
+        .join(Shop, models.Bill.shop_id == Shop.id)
+        .filter(
+            Shop.organization_id == admin.organization_id,
+            models.Bill.created_at >= datetime.combine(s_date, datetime.min.time()),
+            models.Bill.created_at <= datetime.combine(e_date, datetime.max.time())
+        )
+    )
+    if shop_id:
+        top_items_q = top_items_q.filter(models.Bill.shop_id == shop_id)
+    top_items_res = (
+        top_items_q.group_by(models.BillItem.item_name)
+        .order_by(func.sum(models.BillItem.total_price).desc())
+        .limit(10).all()
+    )
+    top_items = [
+        {
+            "item_name": r.item_name,
+            "total_quantity": r.total_quantity,
+            "total_revenue": round(float(r.total_revenue), 2),
+            "avg_discount_pct": round(float(r.avg_discount or 0), 2),
+            "transaction_count": r.transaction_count
+        }
+        for r in top_items_res
+    ]
+
+    # ── Staff performance ────────────────────────────────────────────
+    staff_q = (
+        db.query(
+            models.Bill.staff_name,
+            func.count(models.Bill.id).label('bill_count'),
+            func.sum(models.Bill.total_amount).label('total_revenue')
+        )
+        .join(Shop, models.Bill.shop_id == Shop.id)
+        .filter(
+            Shop.organization_id == admin.organization_id,
+            models.Bill.created_at >= datetime.combine(s_date, datetime.min.time()),
+            models.Bill.created_at <= datetime.combine(e_date, datetime.max.time())
+        )
+    )
+    if shop_id:
+        staff_q = staff_q.filter(models.Bill.shop_id == shop_id)
+    staff_res = staff_q.group_by(models.Bill.staff_name).order_by(func.sum(models.Bill.total_amount).desc()).all()
+    staff_performance = [
+        {
+            "staff_name": r.staff_name,
+            "bill_count": r.bill_count,
+            "total_revenue": round(float(r.total_revenue), 2),
+            "avg_bill": round(float(r.total_revenue) / r.bill_count if r.bill_count > 0 else 0, 2)
+        }
+        for r in staff_res
+    ]
+
+    # ── Shop comparison (admin only) ─────────────────────────────────
+    shop_comparison = []
+    if not shop_id:
+        shop_rev_q = (
+            db.query(
+                models.Bill.shop_id,
+                Shop.shop_name,
+                func.sum(models.Bill.total_amount).label('revenue'),
+                func.count(models.Bill.id).label('bills')
+            )
+            .join(Shop, models.Bill.shop_id == Shop.id)
+            .filter(
+                Shop.organization_id == admin.organization_id,
+                models.Bill.created_at >= datetime.combine(s_date, datetime.min.time()),
+                models.Bill.created_at <= datetime.combine(e_date, datetime.max.time())
+            )
+            .group_by(models.Bill.shop_id, Shop.shop_name)
+            .order_by(func.sum(models.Bill.total_amount).desc())
+            .all()
+        )
+        # Get expenses per shop
+        shop_exp_q = (
+            db.query(DailyRecord.shop_id, func.sum(DailyRecord.total_expenses).label('expenses'))
+            .join(Shop, DailyRecord.shop_id == Shop.id)
+            .filter(
+                Shop.organization_id == admin.organization_id,
+                DailyRecord.record_date >= s_date,
+                DailyRecord.record_date <= e_date
+            )
+            .group_by(DailyRecord.shop_id).all()
+        )
+        shop_exp_map = {r.shop_id: float(r.expenses) for r in shop_exp_q}
+
+        for r in shop_rev_q:
+            rev = float(r.revenue)
+            exp = shop_exp_map.get(r.shop_id, 0)
+            profit = rev - exp
+            shop_comparison.append({
+                "shop_id": r.shop_id,
+                "shop_name": r.shop_name,
+                "revenue": round(rev, 2),
+                "expenses": round(exp, 2),
+                "net_profit": round(profit, 2),
+                "profit_margin": round(profit / rev * 100 if rev > 0 else 0, 2),
+                "bills": r.bills
+            })
+
+    # ── Bill list ────────────────────────────────────────────────────
+    bill_list = [
+        {
+            "id": b.id,
+            "bill_number": b.bill_number,
+            "date": b.created_at.strftime('%Y-%m-%d %H:%M'),
+            "customer_name": b.customer_name or "Walk-in",
+            "customer_phone": b.customer_phone or "",
+            "staff_name": b.staff_name,
+            "subtotal": round(b.subtotal, 2),
+            "discount_amount": round(b.discount_amount, 2),
+            "tax_amount": round(b.tax_amount, 2),
+            "total_amount": round(b.total_amount, 2),
+            "payment_method": b.payment_method,
+            "items_count": len(b.items)
+        }
+        for b in bills[:200]
+    ]
+
+    result = {
+        "summary": {
+            "period_days": days,
+            "start_date": str(s_date),
+            "end_date": str(e_date),
+            "total_revenue": round(total_revenue, 2),
+            "total_bills": len(bills),
+            "avg_bill_value": round(total_revenue / len(bills) if bills else 0, 2),
+            "total_discounts_given": round(total_discounts, 2),
+            "discount_rate": round(total_discounts / (total_revenue + total_discounts) * 100 if (total_revenue + total_discounts) > 0 else 0, 2),
+            "total_tax_collected": round(total_tax, 2),
+            "total_expenses": round(total_expenses, 2),
+            "net_profit": round(net_profit, 2),
+            "profit_margin": profit_margin
+        },
+        "daily_pnl": daily_pnl,
+        "expense_breakdown": expense_breakdown,
+        "payment_split": payment_split,
+        "top_items": top_items,
+        "staff_performance": staff_performance,
+        "shop_comparison": shop_comparison,
+        "bill_list": bill_list
+    }
+
+    if not search:
+        dashboard_cache.set(cache_key, result, ttl=60)
+    return result

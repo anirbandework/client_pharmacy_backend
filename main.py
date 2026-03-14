@@ -16,7 +16,6 @@ from modules.invoice_analyzer_v2.staff.staff_routes import router as invoice_sta
 from modules.invoice_analyzer_v2.admin.admin_routes import router as invoice_admin_router
 from modules.stock_audit_v2.staff.staff_routes import router as stock_staff_router
 from modules.stock_audit_v2.admin.admin_routes import router as stock_admin_router
-from modules.profit_analysis.routes import router as profit_router
 from modules.auth.routes import router as auth_router
 from modules.auth.distributor.routes import router as distributor_router
 from modules.distributor_invoice.routes import router as distributor_invoice_router
@@ -169,7 +168,6 @@ app.include_router(stock_staff_router, prefix="/api/stock-audit/staff", tags=["S
 app.include_router(stock_admin_router, prefix="/api/stock-audit/admin", tags=["Stock Audit - Admin"])
 app.include_router(billing_staff_router, prefix="/api/billing", tags=["Billing"])
 app.include_router(billing_admin_router, prefix="/api/billing", tags=["Billing Admin"])
-app.include_router(profit_router, prefix="/api/profit", tags=["Profit Analysis"])
 
 # Start attendance scheduler for stale session detection
 start_scheduler()
@@ -203,7 +201,7 @@ async def health_check():
     gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     return {
         "status": "healthy",
-        "modules": ["auth", "rbac", "salary_management", "attendance", "notifications", "feedback", "customer_tracking", "purchase_invoice_analyzer", "stock_audit", "billing", "profit_analysis"],
+        "modules": ["auth", "rbac", "salary_management", "attendance", "notifications", "feedback", "customer_tracking", "purchase_invoice_analyzer", "stock_audit", "billing"],
         "ai_extraction": "enabled" if gemini_key else "disabled (fallback only - set GEMINI_API_KEY)"
     }
 
@@ -221,6 +219,5 @@ async def list_modules():
             "invoice_analyzer": "PDF-based purchase invoice analyzer with automatic data extraction, supplier tracking, and item-wise GST details",
             "stock_audit": "Random section auditing with discrepancy tracking",
             "billing": "Customer billing system with medicine search, stock integration, payment tracking (cash/online), and daily business records",
-            "profit_analysis": "Bill-wise profit margin calculation"
         }
     }
