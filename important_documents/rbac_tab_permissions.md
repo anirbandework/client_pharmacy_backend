@@ -43,7 +43,7 @@ This document explains how to extend tab-level permissions to any new page.
 | `src/features/RBAC/services/rbacApi.js` | Added `getModuleTabs(orgId, moduleKey)` and `updateTabPermission(orgId, moduleKey, tabKey, enabled)` |
 | `src/features/RBAC/components/OrganizationPermissions.jsx` | Added state for expanded tabs, lazy tab loading, toggle handler; added purple **Tabs** button on each tabbed module that expands a grid of per-tab toggles |
 | `src/hooks/useTabPermissions.js` | New reusable hook — fetches `/api/rbac/my-permissions`, exposes `isTabEnabled(tabKey)` |
-| `src/features/PurchaseInvoice/admin_purchase_invoice_page.jsx` | Added `useTabPermissions('invoice_analytics')`, renamed `tabs` → `allTabs`, added filter |
+| `src/features/PurchaseInvoice/admin_purchase_invoice_page.jsx` | Added `useTabPermissions('invoice_analytics')`, renamed `tabs` → `allTabs`, added filter + `useEffect` to reset `activeTab` |
 | `src/features/PurchaseInvoice/staff_purchase_invoice_page.jsx` | Added `useTabPermissions('purchase_invoice')`, same pattern |
 | `src/features/StockAudit/admin_stock_audit_page.jsx` | Added `useTabPermissions('stock_analytics')`, same pattern |
 | `src/features/StockAudit/staff_stock_audit_page.jsx` | Added `useTabPermissions('stock_audit')`, same pattern |
@@ -97,17 +97,18 @@ That's all for the UI — the **Tabs** button and the tab toggle grid are render
 
 ### Step 3 — Update the page component
 
-Open the page JSX file and make these two changes:
+Open the page JSX file and make these changes:
 
-**A. Import the hook** (at the top):
+**A. Import the hook and `useEffect`** (at the top):
 ```jsx
+import { useState, useEffect } from 'react'
 import useTabPermissions from '../../hooks/useTabPermissions'
 // adjust the relative path based on where the page file lives
 ```
 
-**B. Add the hook call and filter** (inside the component, before the return):
+**B. Add the hook call, filter, and active-tab reset** (inside the component, before the return):
 ```jsx
-const { isTabEnabled } = useTabPermissions('my_module_key')
+const { isTabEnabled, isLoaded } = useTabPermissions('my_module_key')
 
 const allTabs = [
   { id: 'tab-one',   label: 'Tab One',   icon: SomeIcon },
@@ -115,7 +116,16 @@ const allTabs = [
   { id: 'tab-three', label: 'Tab Three', icon: AnotherIcon },
 ]
 const tabs = allTabs.filter(t => isTabEnabled(t.id))  // ← was just `tabs = [...]` before
+
+// Reset activeTab to first permitted tab if the current default is not permitted
+useEffect(() => {
+  if (isLoaded && tabs.length > 0 && !tabs.find(t => t.id === activeTab)) {
+    setActiveTab(tabs[0].id)
+  }
+}, [isLoaded, tabs.length])
 ```
+
+**Why the `useEffect` is required:** `activeTab` is initialized to a hardcoded default (e.g. `'list'`). If that tab is disabled for a user, the tab bar shows only their permitted tabs but the content area still renders the default tab's component — they go out of sync. The `useEffect` fires once permissions finish loading (`isLoaded` becomes `true`) and resets `activeTab` to the first available tab if the current one is no longer permitted.
 
 The rest of the page (tab bar render, content render) uses `tabs` and works unchanged.
 
