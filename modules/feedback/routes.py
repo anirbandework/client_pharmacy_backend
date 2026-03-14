@@ -1,12 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from app.database.database import get_db
 from typing import List, Optional
 from datetime import datetime
 from . import schemas, models
-from modules.auth.dependencies import get_current_user as get_user_dict, get_current_admin, get_current_staff, get_current_super_admin
-from modules.auth.models import Staff, Admin, SuperAdmin, Shop
+from modules.auth.dependencies import get_current_user as get_user_dict, get_current_super_admin
+from modules.auth.models import Admin, SuperAdmin
 from app.utils.cache import dashboard_cache
 
 router = APIRouter()
@@ -59,29 +59,6 @@ def submit_user_feedback(
     db.refresh(db_feedback)
     return db_feedback
 
-# ADMIN FEEDBACK (DEPRECATED - use /user/feedback)
-@router.post("/admin/feedback", response_model=schemas.FeedbackResponse)
-def submit_admin_feedback(
-    feedback: schemas.FeedbackCreate,
-    admin: Admin = Depends(get_current_admin),
-    db: Session = Depends(get_db)
-):
-    """Admin submits feedback (deprecated, use /user/feedback)"""
-    db_feedback = models.Feedback(
-        user_type="admin",
-        user_id=admin.id,
-        user_name=admin.full_name,
-        user_phone=admin.phone,
-        user_email=admin.email,
-        organization_id=admin.organization_id,
-        **feedback.model_dump()
-    )
-    
-    db.add(db_feedback)
-    db.commit()
-    db.refresh(db_feedback)
-    return db_feedback
-
 # GET USER'S OWN FEEDBACK
 @router.get("/my-feedback", response_model=List[schemas.FeedbackResponse])
 def get_my_feedback(
@@ -123,7 +100,7 @@ def get_unread_responses_count(
     ).count()
     
     result = {"unread_responses": unread}
-    dashboard_cache.set(cache_key, result)
+    dashboard_cache.set(cache_key, result, ttl=60)
     return result
 
 # MARK FEEDBACK AS READ
@@ -149,7 +126,11 @@ def mark_feedback_as_read(
     feedback.status = "closed"
     feedback.updated_at = datetime.now()
     db.commit()
-    
+
+    # Invalidate unread count cache for this user
+    cache_key = f"feedback_unread:{user_type}:{user_id}"
+    dashboard_cache.clear(cache_key)
+
     return {"message": "Feedback marked as read"}
 
 # SUPERADMIN - VIEW ALL FEEDBACK
@@ -245,5 +226,5 @@ def get_feedback_stats(
             2
         )
     }
-    dashboard_cache.set(cache_key, result)
+    dashboard_cache.set(cache_key, result, ttl=60)
     return result
