@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List, Optional, Dict
 from . import models, schemas
 
 class RBACService:
@@ -54,27 +54,78 @@ class RBACService:
         return db.query(models.Module).all()
     
     @staticmethod
+    def get_tab_permissions(db: Session, organization_id: str, module_key: str) -> Dict[str, bool]:
+        """Get tab permissions for a module as {tab_key: enabled} dict. Defaults to True if not set."""
+        tab_defs = models.MODULE_TABS.get(module_key, [])
+        if not tab_defs:
+            return {}
+
+        tab_records = db.query(models.OrganizationTabPermission).filter(
+            models.OrganizationTabPermission.organization_id == organization_id,
+            models.OrganizationTabPermission.module_key == module_key
+        ).all()
+
+        tab_map = {r.tab_key: r.enabled for r in tab_records}
+
+        # Fill defaults: if no record exists for a tab, it defaults to True
+        return {t["tab_key"]: tab_map.get(t["tab_key"], True) for t in tab_defs}
+
+    @staticmethod
+    def update_tab_permission(
+        db: Session,
+        organization_id: str,
+        module_key: str,
+        tab_key: str,
+        enabled: bool,
+        configured_by: str
+    ) -> models.OrganizationTabPermission:
+        """Create or update a single tab permission."""
+        record = db.query(models.OrganizationTabPermission).filter(
+            models.OrganizationTabPermission.organization_id == organization_id,
+            models.OrganizationTabPermission.module_key == module_key,
+            models.OrganizationTabPermission.tab_key == tab_key
+        ).first()
+
+        if record:
+            record.enabled = enabled
+            record.configured_by = configured_by
+        else:
+            record = models.OrganizationTabPermission(
+                organization_id=organization_id,
+                module_key=module_key,
+                tab_key=tab_key,
+                enabled=enabled,
+                configured_by=configured_by
+            )
+            db.add(record)
+
+        db.commit()
+        db.refresh(record)
+        return record
+
+    @staticmethod
     def get_user_permissions(db: Session, user_type: str, organization_id: Optional[str]) -> List[schemas.ModuleWithPermission]:
         """Get modules accessible to user based on their role and organization permissions"""
-        
+
         # Ensure default modules exist
         RBACService.get_or_create_default_modules(db)
-        
+
         if user_type == "super_admin":
-            # SuperAdmin has access to all modules
+            # SuperAdmin has access to all modules and all tabs
             modules = db.query(models.Module).all()
             return [
                 schemas.ModuleWithPermission(
                     **module.__dict__,
                     admin_enabled=True,
-                    staff_enabled=True
+                    staff_enabled=True,
+                    tab_permissions={t["tab_key"]: True for t in models.MODULE_TABS.get(module.module_key, [])}
                 )
                 for module in modules
             ]
-        
+
         if not organization_id:
             return []
-        
+
         # Get organization permissions
         permissions = db.query(
             models.Module,
@@ -84,7 +135,7 @@ class RBACService:
             (models.Module.id == models.OrganizationModulePermission.module_id) &
             (models.OrganizationModulePermission.organization_id == organization_id)
         ).all()
-        
+
         result = []
         for module, permission in permissions:
             # If no permission record, use default
@@ -94,19 +145,22 @@ class RBACService:
             else:
                 admin_enabled = module.default_enabled
                 staff_enabled = module.default_enabled
-            
+
             # Filter based on user type
             if user_type == "admin" and not admin_enabled:
                 continue
             if user_type == "staff" and not staff_enabled:
                 continue
-            
+
+            tab_permissions = RBACService.get_tab_permissions(db, organization_id, module.module_key)
+
             result.append(schemas.ModuleWithPermission(
                 **module.__dict__,
                 admin_enabled=admin_enabled,
-                staff_enabled=staff_enabled
+                staff_enabled=staff_enabled,
+                tab_permissions=tab_permissions
             ))
-        
+
         return result
     
     @staticmethod

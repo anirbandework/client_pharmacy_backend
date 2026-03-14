@@ -36,14 +36,22 @@ def admin_verify_invoice(
     if invoice.is_admin_verified:
         raise HTTPException(status_code=400, detail="Invoice already admin-verified")
     
-    # Mark as admin verified
+    # Mark as admin verified (not yet committed — verification + stock sync commit atomically)
     invoice.is_admin_verified = True
     invoice.admin_verified_by = admin.id
     invoice.admin_verified_at = datetime.now()
     invoice.is_verified = True  # Legacy field
     invoice.updated_at = datetime.now()
-    
-    db.commit()
+
+    # Sync to stock and commit both together in one transaction
+    try:
+        from modules.stock_audit_v2.sync_service import InvoiceStockSyncService
+        sync_result = InvoiceStockSyncService.sync_invoice_to_stock(db, invoice_id, invoice.shop_id)
+        db.commit()  # Single commit: verification + all stock changes are atomic
+    except Exception as e:
+        db.rollback()  # Rolls back verification fields AND any partial stock writes
+        logger.error(f"❌ Failed to sync invoice {invoice_id} to stock, rolling back verification: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to sync to stock: {str(e)}")
 
     logger.info(
         f"AUDIT | action=admin_verify | invoice_id={invoice_id} | "
@@ -55,21 +63,8 @@ def admin_verify_invoice(
     dashboard_cache.clear_prefix(f"dashboard:{admin.organization_id}")
     dashboard_cache.clear_prefix(f"ai_analytics:{admin.organization_id}")
 
-    # Now sync to stock
-    try:
-        from modules.stock_audit_v2.sync_service import InvoiceStockSyncService
-        sync_result = InvoiceStockSyncService.sync_invoice_to_stock(db, invoice_id, invoice.shop_id)
-        logger.info(f"✅ Admin verified and synced invoice {invoice_id} to stock: {sync_result}")
-        return {"message": "Invoice admin-verified and synced to stock", "sync_result": sync_result}
-    except Exception as e:
-        logger.error(f"❌ Failed to sync invoice to stock: {e}")
-        # Rollback admin verification if sync fails
-        invoice.is_admin_verified = False
-        invoice.admin_verified_by = None
-        invoice.admin_verified_at = None
-        invoice.is_verified = False
-        db.commit()
-        raise HTTPException(status_code=500, detail=f"Failed to sync to stock: {str(e)}")
+    logger.info(f"✅ Admin verified and synced invoice {invoice_id} to stock: {sync_result}")
+    return {"message": "Invoice admin-verified and synced to stock", "sync_result": sync_result}
 
 @router.post("/{invoice_id}/admin-reject")
 def admin_reject_invoice(
@@ -161,28 +156,38 @@ def admin_update_invoice(
     ).delete()
 
     # Truncate string fields to prevent database errors
-    def truncate_str(value, max_length=255):
+    def truncate_str(value, max_length=255, field_name=None):
         if value is None:
             return None
-        return str(value)[:max_length] if len(str(value)) > max_length else str(value)
+        s = str(value)
+        if len(s) > max_length:
+            if field_name in ("product_name", "batch_number"):
+                # These fields are used as stock-matching keys — truncation causes sync/reversal mismatches
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"'{field_name}' exceeds {max_length} characters and cannot be safely stored. Please shorten it."
+                )
+            logger.warning(f"Truncating field '{field_name}' from {len(s)} to {max_length} chars")
+            return s[:max_length]
+        return s
 
     # Add updated items
     for item_data in invoice_data.items:
         item = models.PurchaseInvoiceItem(
             invoice_id=invoice.id,
             shop_id=invoice.shop_id,
-            composition=truncate_str(item_data.composition),
-            manufacturer=truncate_str(item_data.manufacturer),
-            hsn_code=truncate_str(item_data.hsn_code),
-            product_name=truncate_str(item_data.product_name or "Unknown Product"),
-            batch_number=truncate_str(item_data.batch_number),
+            composition=truncate_str(item_data.composition, field_name="composition"),
+            manufacturer=truncate_str(item_data.manufacturer, field_name="manufacturer"),
+            hsn_code=truncate_str(item_data.hsn_code, field_name="hsn_code"),
+            product_name=truncate_str(item_data.product_name or "Unknown Product", field_name="product_name"),
+            batch_number=truncate_str(item_data.batch_number, field_name="batch_number"),
             quantity=item_data.quantity,
             free_quantity=item_data.free_quantity,
-            package=truncate_str(item_data.package),
-            unit=truncate_str(item_data.unit),
+            package=truncate_str(item_data.package, field_name="package"),
+            unit=truncate_str(item_data.unit, field_name="unit"),
             manufacturing_date=item_data.manufacturing_date,
             expiry_date=item_data.expiry_date,
-            mrp=truncate_str(item_data.mrp),
+            mrp=truncate_str(item_data.mrp, field_name="mrp"),
             unit_price=item_data.unit_price,
             selling_price=item_data.selling_price,
             profit_margin=item_data.profit_margin,
@@ -386,7 +391,7 @@ def get_admin_invoices(
     if shop_id:
         query = query.filter(models.PurchaseInvoice.shop_id == shop_id)
 
-    invoices = query.order_by(models.PurchaseInvoice.invoice_date.desc()).offset(offset).limit(limit).all()
+    invoices = query.order_by(models.PurchaseInvoice.created_at.desc()).offset(offset).limit(limit).all()
     
     result = []
     for inv in invoices:

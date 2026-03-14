@@ -1,9 +1,12 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, extract
 from datetime import datetime, date, time, timedelta
+from zoneinfo import ZoneInfo
 from typing import List, Optional, Dict
 from . import models, schemas
 from ..models import Staff, Shop
+
+LOCAL_TZ = ZoneInfo("Asia/Kolkata")
 
 class AttendanceService:
     """Service for attendance viewing and reporting - check-in/out handled by WiFiHeartbeatService"""
@@ -118,10 +121,16 @@ class AttendanceService:
             total_days = len(records)
             present_days = len([r for r in records if r.status in ["present", "late"]])
             late_days = len([r for r in records if r.is_late])
-            
-            # Calculate working days in month
-            working_days = last_day
-            absent_days = working_days - present_days - leave_days
+
+            # Calculate actual working days using shop's configured working days
+            settings = AttendanceService._get_or_create_settings(db, shop_id)
+            day_names = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
+            working_days = sum(
+                1 for d in range(1, last_day + 1)
+                if getattr(settings, day_names[date(year, month, d).weekday()], False)
+            ) or last_day  # fallback to calendar days if nothing configured
+
+            absent_days = max(0, working_days - present_days - leave_days)
             
             attendance_percentage = (present_days / working_days * 100) if working_days > 0 else 0
             
@@ -173,8 +182,9 @@ class AttendanceService:
                 models.AttendanceRecord.check_out_time.is_(None)
             ).all()
             
-            auto_checkout_dt = datetime.combine(today, settings.auto_checkout_time)
-            
+            # Build timezone-aware checkout time, then strip tz for DB storage (naive UTC-equivalent)
+            auto_checkout_dt = datetime.combine(today, settings.auto_checkout_time, tzinfo=LOCAL_TZ).replace(tzinfo=None)
+
             for record in records:
                 record.check_out_time = auto_checkout_dt
                 record.auto_checked_out = True

@@ -49,8 +49,10 @@ class BillingService:
                 StockItem.batch_number.ilike(f"%{search_term}%"),
                 StockItem.manufacturer.ilike(f"%{search_term}%")
             )
+        ).order_by(
+            StockItem.expiry_date.asc().nulls_last()
         ).limit(limit)
-        
+
         results = []
         for item, section_name, rack_number in query.all():
             results.append({
@@ -60,6 +62,7 @@ class BillingService:
                 "quantity_available": item.quantity_software,
                 "mrp": item.mrp,
                 "unit_price": item.unit_price,
+                "selling_price": item.selling_price,
                 "rack_number": rack_number or "Unassigned",
                 "section_name": section_name or "Unassigned",
                 "expiry_date": item.expiry_date.isoformat() if item.expiry_date else None,
@@ -67,7 +70,7 @@ class BillingService:
                 "hsn_code": item.hsn_code,
                 "package": item.package
             })
-        
+
         return results
     
     @staticmethod

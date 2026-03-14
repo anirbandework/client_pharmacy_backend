@@ -1,7 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from app.database.database import get_db
-from typing import List
+from typing import List, Optional
 from modules.auth.dependencies import get_current_admin, get_current_staff
 from modules.auth.models import Admin, Staff
 from app.utils.cache import dashboard_cache
@@ -40,10 +40,11 @@ def send_notification(
 def get_sent_notifications(
     admin: Admin = Depends(get_current_admin),
     db: Session = Depends(get_db),
+    shop_code: Optional[str] = Query(None),
     limit: int = 50
 ):
-    """Get notifications sent by admin"""
-    notifications = NotificationService.get_admin_notifications(db, admin, limit)
+    """Get notifications sent by admin, optionally filtered by shop"""
+    notifications = NotificationService.get_admin_notifications(db, admin, shop_code, limit)
     return [
         schemas.NotificationResponse(
             id=n.id,
@@ -145,7 +146,68 @@ def get_unread_count(
     cached = dashboard_cache.get(cache_key, ttl_seconds=30)
     if cached is not None:
         return {"unread_count": cached}
-    
+
     count = NotificationService.get_unread_count_optimized(db, staff)
     dashboard_cache.set(cache_key, count)
     return {"unread_count": count}
+
+
+# ── STAFF REQUEST ENDPOINTS ───────────────────────────────────────────────────
+
+@router.post("/staff/request", response_model=schemas.StaffRequestResponse)
+def send_staff_request(
+    data: schemas.StaffRequestCreate,
+    staff: Staff = Depends(get_current_staff),
+    db: Session = Depends(get_db)
+):
+    """Staff sends a request/message to their shop admin"""
+    req = NotificationService.create_staff_request(db, staff, data)
+    return req
+
+
+@router.get("/staff/my-requests", response_model=List[schemas.StaffRequestResponse])
+def get_my_requests(
+    staff: Staff = Depends(get_current_staff),
+    db: Session = Depends(get_db),
+    limit: int = 50
+):
+    """Staff views their own sent requests"""
+    return NotificationService.get_staff_own_requests(db, staff, limit)
+
+
+@router.get("/admin/requests", response_model=List[schemas.StaffRequestResponse])
+def get_staff_requests(
+    admin: Admin = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+    shop_code: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    limit: int = 100
+):
+    """Admin views staff requests, optionally filtered by shop"""
+    return NotificationService.get_admin_staff_requests(db, admin, shop_code, status, limit)
+
+
+@router.put("/admin/requests/{request_id}/acknowledge", response_model=schemas.StaffRequestResponse)
+def acknowledge_request(
+    request_id: int,
+    admin: Admin = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """Admin acknowledges a staff request"""
+    req = NotificationService.acknowledge_staff_request(db, request_id, admin, dismiss=False)
+    if not req:
+        raise HTTPException(status_code=404, detail="Request not found")
+    return req
+
+
+@router.put("/admin/requests/{request_id}/dismiss", response_model=schemas.StaffRequestResponse)
+def dismiss_request(
+    request_id: int,
+    admin: Admin = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """Admin dismisses a staff request"""
+    req = NotificationService.acknowledge_staff_request(db, request_id, admin, dismiss=True)
+    if not req:
+        raise HTTPException(status_code=404, detail="Request not found")
+    return req

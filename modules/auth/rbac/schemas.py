@@ -47,9 +47,22 @@ class OrganizationModulePermission(BaseModel):
     class Config:
         from_attributes = True
 
+class TabPermission(BaseModel):
+    tab_key: str
+    tab_label: str
+    enabled: bool
+
+class TabPermissionUpdate(BaseModel):
+    enabled: bool
+
+class ModuleTabsResponse(BaseModel):
+    module_key: str
+    tabs: List[TabPermission]
+
 class ModuleWithPermission(Module):
     admin_enabled: bool
     staff_enabled: bool
+    tab_permissions: Optional[dict] = None  # {tab_key: bool}
 
 class UserPermissionsResponse(BaseModel):
     user_type: str

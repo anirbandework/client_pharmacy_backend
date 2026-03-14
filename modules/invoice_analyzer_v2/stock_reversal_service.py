@@ -31,6 +31,9 @@ def reverse_stock_for_invoice(db: Session, invoice, invoice_id: int, shop_id: in
         from modules.billing_v2.models import BillItem
 
         for invoice_item in invoice.items:
+            if not invoice_item.product_name:
+                continue
+
             stock_item = db.query(StockItem).filter(
                 StockItem.shop_id == shop_id,
                 StockItem.product_name == invoice_item.product_name,
@@ -40,21 +43,26 @@ def reverse_stock_for_invoice(db: Session, invoice, invoice_id: int, shop_id: in
             if not stock_item:
                 continue
 
+            # Reverse the same quantity that was synced (billed + free)
+            billed_qty = invoice_item.quantity or 0
+            free_qty = invoice_item.free_quantity or 0
+            total_quantity = round(billed_qty + free_qty)
+
             bill_item_count = db.query(BillItem).filter(
                 BillItem.stock_item_id == stock_item.id
             ).count()
 
             if bill_item_count > 0:
                 # Item used in bills — reduce quantity and nullify source, but keep the stock item
-                stock_item.quantity_software -= int(invoice_item.quantity)
+                stock_item.quantity_software -= total_quantity
                 stock_item.source_invoice_id = None
                 stock_item.updated_at = datetime.now()
                 items_in_use.append(invoice_item.product_name)
                 logger.info(
-                    f"Reversed stock for {stock_item.product_name}: -{invoice_item.quantity} (item in use, not deleted)"
+                    f"Reversed stock for {stock_item.product_name}: -{total_quantity} (item in use, not deleted)"
                 )
             else:
-                stock_item.quantity_software -= int(invoice_item.quantity)
+                stock_item.quantity_software -= total_quantity
 
                 if stock_item.quantity_software <= 0 and stock_item.source_invoice_id == invoice_id:
                     # Clear FK before deletion
@@ -66,7 +74,7 @@ def reverse_stock_for_invoice(db: Session, invoice, invoice_id: int, shop_id: in
                     stock_item.source_invoice_id = None
                     stock_item.updated_at = datetime.now()
                     logger.info(
-                        f"Reversed stock for {stock_item.product_name}: -{invoice_item.quantity}"
+                        f"Reversed stock for {stock_item.product_name}: -{total_quantity}"
                     )
 
         # Clear any remaining FK references to this invoice

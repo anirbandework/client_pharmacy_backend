@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.database.database import get_db
 from datetime import datetime, date, timedelta
 from typing import Optional
+import math
 from .. import schemas, models
 from .admin_analytics_service import StockAuditAnalytics
 from .admin_ai_analytics_service import StockAuditAIAnalytics
@@ -23,8 +24,13 @@ def get_admin_racks(
     db: Session = Depends(get_db),
     admin = Depends(get_current_admin)
 ):
-    """Get all store racks for admin (all shops)"""
-    return db.query(models.StockRack).all()
+    """Get all store racks for admin (org-scoped)"""
+    return (
+        db.query(models.StockRack)
+        .join(Shop, models.StockRack.shop_id == Shop.id)
+        .filter(Shop.organization_id == admin.organization_id)
+        .all()
+    )
 
 @router.get("/sections", response_model=list[schemas.StoreSection])
 def get_admin_sections(
@@ -32,8 +38,12 @@ def get_admin_sections(
     db: Session = Depends(get_db),
     admin = Depends(get_current_admin)
 ):
-    """Get all sections for admin (all shops)"""
-    query = db.query(models.StockSection)
+    """Get all sections for admin (org-scoped)"""
+    query = (
+        db.query(models.StockSection)
+        .join(Shop, models.StockSection.shop_id == Shop.id)
+        .filter(Shop.organization_id == admin.organization_id)
+    )
     if rack_id:
         query = query.filter(models.StockSection.rack_id == rack_id)
     return query.all()
@@ -43,16 +53,34 @@ def get_admin_sections(
 @router.get("/uploads")
 def get_admin_excel_uploads(
     status: Optional[str] = None,
+    search: Optional[str] = None,
+    shop_id: Optional[int] = Query(None),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
     admin = Depends(get_current_admin)
 ):
-    """Get Excel uploads for admin (all shops)"""
-    query = db.query(models.ExcelUpload)
-    
+    """Get Excel uploads for admin (org-scoped, paginated, searchable)"""
+    import math
+    query = (
+        db.query(models.ExcelUpload)
+        .join(Shop, models.ExcelUpload.shop_id == Shop.id)
+        .filter(Shop.organization_id == admin.organization_id)
+    )
+
     if status:
         query = query.filter(models.ExcelUpload.status == status)
-    
-    uploads = query.order_by(models.ExcelUpload.uploaded_at.desc()).all()
+    if shop_id:
+        query = query.filter(models.ExcelUpload.shop_id == shop_id)
+    if search:
+        search_term = f"%{search}%"
+        query = query.filter(
+            (models.ExcelUpload.filename.ilike(search_term)) |
+            (models.ExcelUpload.uploaded_by_staff_name.ilike(search_term))
+        )
+
+    total = query.count()
+    uploads = query.order_by(models.ExcelUpload.uploaded_at.desc()).offset((page - 1) * per_page).limit(per_page).all()
 
     result = []
     for upload in uploads:
@@ -76,8 +104,14 @@ def get_admin_excel_uploads(
             "admin_notes": upload.admin_notes,
             "rejection_reason": upload.rejection_reason
         })
-    
-    return result
+
+    return {
+        "items": result,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "pages": math.ceil(total / per_page) if total > 0 else 1
+    }
 
 @router.get("/uploads/{upload_id}/items")
 def get_admin_upload_items(
@@ -86,8 +120,9 @@ def get_admin_upload_items(
     admin = Depends(get_current_admin)
 ):
     """Get items from specific upload (admin)"""
-    upload = db.query(models.ExcelUpload).filter(
-        models.ExcelUpload.id == upload_id
+    upload = db.query(models.ExcelUpload).join(Shop, models.ExcelUpload.shop_id == Shop.id).filter(
+        models.ExcelUpload.id == upload_id,
+        Shop.organization_id == admin.organization_id
     ).first()
     if not upload:
         raise HTTPException(status_code=404, detail="Upload not found")
@@ -128,7 +163,17 @@ def get_admin_upload_items(
             "filename": upload.filename,
             "uploaded_by": upload.uploaded_by_staff_name,
             "uploaded_at": upload.uploaded_at,
-            "status": upload.status
+            "status": upload.status,
+            "upload_notes": upload.upload_notes,
+            "staff_notes": upload.staff_notes,
+            "admin_notes": upload.admin_notes,
+            "staff_verified": upload.staff_verified,
+            "staff_verified_by": upload.staff_verified_by_name,
+            "staff_verified_at": upload.staff_verified_at,
+            "admin_verified": upload.admin_verified,
+            "admin_verified_by": upload.admin_verified_by_name,
+            "admin_verified_at": upload.admin_verified_at,
+            "rejection_reason": upload.rejection_reason
         },
         "items": result
     }
@@ -142,8 +187,9 @@ def update_upload_item(
     admin = Depends(get_current_admin)
 ):
     """Update item in upload (admin can modify)"""
-    upload = db.query(models.ExcelUpload).filter(
-        models.ExcelUpload.id == upload_id
+    upload = db.query(models.ExcelUpload).join(Shop, models.ExcelUpload.shop_id == Shop.id).filter(
+        models.ExcelUpload.id == upload_id,
+        Shop.organization_id == admin.organization_id
     ).first()
     if not upload:
         raise HTTPException(status_code=404, detail="Upload not found")
@@ -170,9 +216,11 @@ def update_upload_item(
                             setattr(item, key, float(value) if value else None)
                     except (ValueError, TypeError):
                         setattr(item, key, None)
+            elif key in ['expiry_date', 'manufacturing_date']:
+                setattr(item, key, value if value else None)
             else:
                 setattr(item, key, value)
-    
+
     item.modified_by_admin = True
     db.commit()
     return {"message": "Item updated successfully"}
@@ -185,8 +233,9 @@ def delete_upload_item(
     admin = Depends(get_current_admin)
 ):
     """Delete item from upload (admin)"""
-    upload = db.query(models.ExcelUpload).filter(
-        models.ExcelUpload.id == upload_id
+    upload = db.query(models.ExcelUpload).join(Shop, models.ExcelUpload.shop_id == Shop.id).filter(
+        models.ExcelUpload.id == upload_id,
+        Shop.organization_id == admin.organization_id
     ).first()
     if not upload:
         raise HTTPException(status_code=404, detail="Upload not found")
@@ -212,8 +261,9 @@ def admin_verify_upload(
 ):
     """Admin verification and final approval of upload"""
     notes = request_data.get('notes')
-    upload = db.query(models.ExcelUpload).filter(
-        models.ExcelUpload.id == upload_id
+    upload = db.query(models.ExcelUpload).join(Shop, models.ExcelUpload.shop_id == Shop.id).filter(
+        models.ExcelUpload.id == upload_id,
+        Shop.organization_id == admin.organization_id
     ).first()
     if not upload:
         raise HTTPException(status_code=404, detail="Upload not found")
@@ -281,9 +331,10 @@ def reject_upload(
 ):
     """Reject upload (admin)"""
     reason = request_data.get('reason')
-    
-    upload = db.query(models.ExcelUpload).filter(
-        models.ExcelUpload.id == upload_id
+
+    upload = db.query(models.ExcelUpload).join(Shop, models.ExcelUpload.shop_id == Shop.id).filter(
+        models.ExcelUpload.id == upload_id,
+        Shop.organization_id == admin.organization_id
     ).first()
     if not upload:
         raise HTTPException(status_code=404, detail="Upload not found")
@@ -301,8 +352,9 @@ def delete_upload(
     admin = Depends(get_current_admin)
 ):
     """Delete upload and associated data (admin only)"""
-    upload = db.query(models.ExcelUpload).filter(
-        models.ExcelUpload.id == upload_id
+    upload = db.query(models.ExcelUpload).join(Shop, models.ExcelUpload.shop_id == Shop.id).filter(
+        models.ExcelUpload.id == upload_id,
+        Shop.organization_id == admin.organization_id
     ).first()
     if not upload:
         raise HTTPException(status_code=404, detail="Upload not found")
@@ -326,7 +378,497 @@ def delete_upload(
     db.commit()
     return {"message": "Upload and associated data deleted successfully"}
 
+# ADMIN STOCK ITEMS VIEW
+
+@router.get("/items")
+def get_admin_stock_items(
+    shop_id: Optional[int] = Query(None),
+    search: Optional[str] = Query(None),
+    composition: Optional[str] = Query(None),
+    manufacturer: Optional[str] = Query(None),
+    section_id: Optional[int] = Query(None),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    admin = Depends(get_current_admin)
+):
+    """Get paginated stock items for admin (org-scoped, filterable by shop)"""
+    import math
+    query = (
+        db.query(models.StockItem)
+        .join(Shop, models.StockItem.shop_id == Shop.id)
+        .filter(Shop.organization_id == admin.organization_id)
+    )
+    if shop_id:
+        query = query.filter(models.StockItem.shop_id == shop_id)
+    if search:
+        s = f"%{search}%"
+        query = query.filter(
+            (models.StockItem.product_name.ilike(s)) |
+            (models.StockItem.batch_number.ilike(s)) |
+            (models.StockItem.composition.ilike(s))
+        )
+    if composition:
+        query = query.filter(models.StockItem.composition.ilike(f"%{composition}%"))
+    if manufacturer:
+        query = query.filter(models.StockItem.manufacturer.ilike(f"%{manufacturer}%"))
+    if section_id:
+        query = query.filter(models.StockItem.section_id == section_id)
+
+    total = query.count()
+    items = query.order_by(models.StockItem.product_name).offset((page - 1) * per_page).limit(per_page).all()
+
+    shops = db.query(Shop).filter(Shop.organization_id == admin.organization_id).all()
+    shop_map = {s.id: s.shop_name for s in shops}
+
+    result = []
+    for item in items:
+        result.append({
+            "id": item.id,
+            "shop_id": item.shop_id,
+            "shop_name": shop_map.get(item.shop_id, "Unknown"),
+            "product_name": item.product_name,
+            "composition": item.composition,
+            "manufacturer": item.manufacturer,
+            "hsn_code": item.hsn_code,
+            "batch_number": item.batch_number,
+            "package": item.package,
+            "unit": item.unit,
+            "quantity_software": item.quantity_software,
+            "quantity_physical": item.quantity_physical,
+            "audit_discrepancy": item.audit_discrepancy,
+            "mrp": item.mrp,
+            "unit_price": item.unit_price,
+            "selling_price": item.selling_price,
+            "profit_margin": item.profit_margin,
+            "manufacturing_date": item.manufacturing_date,
+            "expiry_date": item.expiry_date,
+            "section_name": item.section.section_name if item.section else None,
+            "rack_number": item.section.rack.rack_number if item.section and item.section.rack else None,
+            "last_audit_date": item.last_audit_date,
+            "created_at": item.created_at
+        })
+
+    return {
+        "items": result,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "pages": math.ceil(total / per_page) if total > 0 else 1
+    }
+
+
+@router.get("/items/consolidated")
+def get_consolidated_stock_items(
+    shop_id: Optional[int] = Query(None),
+    search: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    admin = Depends(get_current_admin)
+):
+    """Get stock items grouped by product_name + composition with per-batch breakdown (org-scoped)"""
+    from collections import defaultdict
+    query = (
+        db.query(models.StockItem)
+        .join(Shop, models.StockItem.shop_id == Shop.id)
+        .filter(Shop.organization_id == admin.organization_id)
+    )
+    if shop_id:
+        query = query.filter(models.StockItem.shop_id == shop_id)
+    if search:
+        s = f"%{search}%"
+        query = query.filter(
+            (models.StockItem.product_name.ilike(s)) |
+            (models.StockItem.composition.ilike(s))
+        )
+
+    shops = db.query(Shop).filter(Shop.organization_id == admin.organization_id).all()
+    shop_map = {s.id: s.shop_name for s in shops}
+
+    items = query.order_by(
+        models.StockItem.product_name,
+        models.StockItem.composition,
+        models.StockItem.batch_number
+    ).all()
+
+    groups = defaultdict(lambda: {
+        "batches": [], "total_qty_software": 0, "total_qty_physical": 0
+    })
+    for item in items:
+        key = (item.product_name or '', item.composition or '', item.shop_id)
+        g = groups[key]
+        g["product_name"] = item.product_name
+        g["composition"] = item.composition
+        g["shop_id"] = item.shop_id
+        g["shop_name"] = shop_map.get(item.shop_id, "Unknown")
+        g["total_qty_software"] += (item.quantity_software or 0)
+        g["total_qty_physical"] += (item.quantity_physical or 0)
+        g["batches"].append({
+            "batch_number": item.batch_number,
+            "expiry_date": item.expiry_date.isoformat() if item.expiry_date else None,
+            "qty_software": item.quantity_software or 0,
+            "qty_physical": item.quantity_physical or 0,
+        })
+
+    result = sorted(groups.values(), key=lambda x: (x.get("product_name") or "").lower())
+    for r in result:
+        r["batch_count"] = len(r["batches"])
+    total = len(result)
+    start = (page - 1) * per_page
+    return {
+        "items": result[start: start + per_page],
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "pages": math.ceil(total / per_page) if total > 0 else 1
+    }
+
+
+# ADMIN REPORTS
+
+@router.get("/reports/low-stock")
+def get_admin_low_stock(
+    threshold: int = Query(10),
+    shop_id: Optional[int] = Query(None),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    admin = Depends(get_current_admin)
+):
+    """Get low stock items for admin (org-scoped)"""
+    import math
+    query = (
+        db.query(models.StockItem)
+        .join(Shop, models.StockItem.shop_id == Shop.id)
+        .filter(
+            Shop.organization_id == admin.organization_id,
+            models.StockItem.quantity_software <= threshold
+        )
+    )
+    if shop_id:
+        query = query.filter(models.StockItem.shop_id == shop_id)
+
+    total = query.count()
+    items = query.order_by(models.StockItem.quantity_software).offset((page - 1) * per_page).limit(per_page).all()
+
+    shops = db.query(Shop).filter(Shop.organization_id == admin.organization_id).all()
+    shop_map = {s.id: s.shop_name for s in shops}
+
+    result = [
+        {
+            "id": i.id,
+            "product_name": i.product_name,
+            "batch_number": i.batch_number,
+            "quantity_software": i.quantity_software,
+            "composition": i.composition,
+            "manufacturer": i.manufacturer,
+            "expiry_date": i.expiry_date,
+            "unit_price": i.unit_price,
+            "mrp": i.mrp,
+            "shop_name": shop_map.get(i.shop_id, "Unknown")
+        }
+        for i in items
+    ]
+
+    return {
+        "items": result,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "pages": math.ceil(total / per_page) if total > 0 else 1
+    }
+
+
+@router.get("/reports/expiring")
+def get_admin_expiring(
+    days_ahead: int = Query(30),
+    shop_id: Optional[int] = Query(None),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    admin = Depends(get_current_admin)
+):
+    """Get expiring items for admin (org-scoped)"""
+    import math
+    cutoff = date.today() + timedelta(days=days_ahead)
+    query = (
+        db.query(models.StockItem)
+        .join(Shop, models.StockItem.shop_id == Shop.id)
+        .filter(
+            Shop.organization_id == admin.organization_id,
+            models.StockItem.expiry_date.isnot(None),
+            models.StockItem.expiry_date <= cutoff
+        )
+    )
+    if shop_id:
+        query = query.filter(models.StockItem.shop_id == shop_id)
+
+    total = query.count()
+    items = query.order_by(models.StockItem.expiry_date).offset((page - 1) * per_page).limit(per_page).all()
+
+    shops = db.query(Shop).filter(Shop.organization_id == admin.organization_id).all()
+    shop_map = {s.id: s.shop_name for s in shops}
+
+    result = [
+        {
+            "id": i.id,
+            "product_name": i.product_name,
+            "batch_number": i.batch_number,
+            "quantity_software": i.quantity_software,
+            "expiry_date": i.expiry_date,
+            "composition": i.composition,
+            "manufacturer": i.manufacturer,
+            "mrp": i.mrp,
+            "unit_price": i.unit_price,
+            "shop_name": shop_map.get(i.shop_id, "Unknown")
+        }
+        for i in items
+    ]
+
+    return {
+        "items": result,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "pages": math.ceil(total / per_page) if total > 0 else 1
+    }
+
+
+@router.get("/audit/discrepancies")
+def get_admin_audit_discrepancies(
+    shop_id: Optional[int] = Query(None),
+    threshold: int = Query(0),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    admin = Depends(get_current_admin)
+):
+    """Get audit discrepancies for admin (org-scoped)"""
+    import math
+    query = (
+        db.query(models.StockAuditRecord)
+        .join(Shop, models.StockAuditRecord.shop_id == Shop.id)
+        .filter(
+            Shop.organization_id == admin.organization_id,
+            models.StockAuditRecord.discrepancy != 0
+        )
+    )
+    if shop_id:
+        query = query.filter(models.StockAuditRecord.shop_id == shop_id)
+
+    total = query.count()
+    records = query.order_by(models.StockAuditRecord.audit_date.desc()).offset((page - 1) * per_page).limit(per_page).all()
+
+    shops = db.query(Shop).filter(Shop.organization_id == admin.organization_id).all()
+    shop_map = {s.id: s.shop_name for s in shops}
+
+    result = []
+    for r in records:
+        result.append({
+            "item": {
+                "product_name": r.stock_item.product_name if r.stock_item else "",
+                "batch_number": r.stock_item.batch_number if r.stock_item else "",
+                "composition": r.stock_item.composition if r.stock_item else ""
+            },
+            "software_qty": r.software_quantity,
+            "physical_qty": r.physical_quantity,
+            "difference": r.discrepancy,
+            "section_name": r.stock_item.section.section_name if r.stock_item and r.stock_item.section else "",
+            "rack_number": r.stock_item.section.rack.rack_number if r.stock_item and r.stock_item.section and r.stock_item.section.rack else "",
+            "audited_by_staff_name": r.staff_name,
+            "audit_date": r.audit_date,
+            "shop_name": shop_map.get(r.shop_id, "Unknown")
+        })
+
+    return {
+        "discrepancies": result,
+        "total_discrepancies": total,
+        "page": page,
+        "per_page": per_page,
+        "pages": math.ceil(total / per_page) if total > 0 else 1
+    }
+
+
 # ADMIN ANALYTICS
+
+@router.get("/analytics/ai-analytics")
+def get_admin_ai_analytics(
+    shop_id: Optional[int] = Query(None),
+    days: int = Query(30),
+    db: Session = Depends(get_db),
+    admin = Depends(get_current_admin)
+):
+    """Get comprehensive AI analytics for admin tab (same format as staff AI Analytics tab)"""
+    import json
+    import logging
+    from datetime import timedelta
+
+    logger = logging.getLogger(__name__)
+    cutoff_date = datetime.now() - timedelta(days=days)
+
+    # Build base queries scoped to org
+    item_query = (
+        db.query(models.StockItem)
+        .join(Shop, models.StockItem.shop_id == Shop.id)
+        .filter(Shop.organization_id == admin.organization_id)
+    )
+    audit_query = (
+        db.query(models.StockAuditRecord)
+        .join(Shop, models.StockAuditRecord.shop_id == Shop.id)
+        .filter(
+            Shop.organization_id == admin.organization_id,
+            models.StockAuditRecord.audit_date >= cutoff_date
+        )
+    )
+    if shop_id:
+        item_query = item_query.filter(models.StockItem.shop_id == shop_id)
+        audit_query = audit_query.filter(models.StockAuditRecord.shop_id == shop_id)
+
+    items = item_query.all()
+    audit_records = audit_query.all()
+
+    # Build analytics data
+    discrepancy_by_date = {}
+    for record in audit_records:
+        date_key = record.audit_date.date().isoformat()
+        if date_key not in discrepancy_by_date:
+            discrepancy_by_date[date_key] = {"total": 0, "count": 0}
+        discrepancy_by_date[date_key]["total"] += abs(record.discrepancy)
+        discrepancy_by_date[date_key]["count"] += 1
+
+    section_discrepancies = {}
+    for item in items:
+        if item.section and item.audit_discrepancy and item.audit_discrepancy != 0:
+            section_name = item.section.section_name
+            section_discrepancies[section_name] = section_discrepancies.get(section_name, 0) + abs(item.audit_discrepancy)
+
+    staff_audits = {}
+    for record in audit_records:
+        staff = record.staff_name or "Unknown"
+        if staff not in staff_audits:
+            staff_audits[staff] = {"audits": 0, "discrepancies": 0}
+        staff_audits[staff]["audits"] += 1
+        staff_audits[staff]["discrepancies"] += abs(record.discrepancy)
+
+    total_items = len(items)
+    items_with_disc = sum(1 for i in items if (i.audit_discrepancy or 0) != 0)
+    total_disc_value = sum(abs(i.audit_discrepancy or 0) for i in items)
+    audit_completion = (sum(1 for i in items if i.last_audit_date) / total_items * 100) if total_items > 0 else 0
+
+    analytics_data = {
+        "total_audits": len(audit_records),
+        "total_items": total_items,
+        "items_with_discrepancies": items_with_disc,
+        "total_discrepancy_value": total_disc_value,
+        "audit_completion_rate": audit_completion,
+        "section_discrepancies": section_discrepancies,
+        "staff_performance": staff_audits,
+    }
+
+    # Build chart data
+    trend_dates = sorted(discrepancy_by_date.keys())
+    charts = {
+        "discrepancy_trend": {
+            "labels": trend_dates,
+            "datasets": [{
+                "label": "Average Discrepancy",
+                "data": [discrepancy_by_date[d]["total"] / discrepancy_by_date[d]["count"] for d in trend_dates]
+            }]
+        },
+        "section_discrepancies": {
+            "labels": list(section_discrepancies.keys()),
+            "data": list(section_discrepancies.values())
+        },
+        "staff_performance": {
+            "labels": list(staff_audits.keys()),
+            "datasets": [
+                {"label": "Audits Completed", "data": [staff_audits[s]["audits"] for s in staff_audits]},
+                {"label": "Discrepancies Found", "data": [staff_audits[s]["discrepancies"] for s in staff_audits]}
+            ]
+        }
+    }
+
+    # Generate AI insights
+    ai_insights = None
+    try:
+        from modules.stock_audit_v2.staff.staff_ai_service import StockAuditAIService
+        client = StockAuditAIService._init_gemini()
+        if client:
+            prompt = f"""
+Analyze this pharmacy stock audit data and provide actionable insights:
+
+Summary:
+- Total audits conducted: {analytics_data['total_audits']}
+- Total items in inventory: {analytics_data['total_items']}
+- Items with discrepancies: {analytics_data['items_with_discrepancies']}
+- Total discrepancy value: {analytics_data['total_discrepancy_value']} units
+- Audit completion rate: {analytics_data['audit_completion_rate']:.1f}%
+
+Section-wise discrepancies:
+{json.dumps(section_discrepancies, indent=2)}
+
+Staff performance:
+{json.dumps(staff_audits, indent=2)}
+
+Provide:
+1. Key findings (3-5 bullet points)
+2. Risk areas that need attention
+3. Actionable recommendations (3-5 specific actions)
+4. Predicted issues if trends continue
+
+Format as JSON with keys: findings, risks, recommendations, predictions
+"""
+            response = client.models.generate_content(model='gemini-2.0-flash', contents=prompt)
+            ai_insights = json.loads(response.text.strip().replace("```json", "").replace("```", ""))
+    except Exception as e:
+        logger.error(f"Admin AI generation failed: {e}")
+
+    if not ai_insights:
+        # Fallback insights
+        findings, risks, recommendations = [], [], []
+        if analytics_data['total_audits'] == 0:
+            findings.append("No audits conducted in the selected period")
+            recommendations.append("Start conducting regular stock audits")
+        else:
+            findings.append(f"Completed {analytics_data['total_audits']} audits covering {total_items} items")
+
+        if items_with_disc > 0:
+            rate = (items_with_disc / total_items * 100) if total_items > 0 else 0
+            findings.append(f"{rate:.1f}% of items have discrepancies")
+            if rate > 20:
+                risks.append("High discrepancy rate indicates potential inventory management issues")
+                recommendations.append("Implement stricter inventory controls and staff training")
+
+        if audit_completion < 100:
+            risks.append(f"Only {audit_completion:.1f}% of items have been audited")
+            recommendations.append("Complete audits for all inventory items")
+
+        if section_discrepancies:
+            worst = max(section_discrepancies.items(), key=lambda x: x[1])
+            risks.append(f"Section '{worst[0]}' has highest discrepancies ({worst[1]} units)")
+            recommendations.append(f"Focus audit efforts on {worst[0]} section")
+
+        ai_insights = {
+            "findings": findings or ["Insufficient data for analysis"],
+            "risks": risks or ["No significant risks identified"],
+            "recommendations": recommendations or ["Continue regular audits"],
+            "predictions": ["AI predictions unavailable - using statistical analysis"]
+        }
+
+    return {
+        "summary": {
+            "total_audits": analytics_data["total_audits"],
+            "total_items": analytics_data["total_items"],
+            "items_with_discrepancies": analytics_data["items_with_discrepancies"],
+            "total_discrepancy_value": analytics_data["total_discrepancy_value"],
+            "audit_completion_rate": round(analytics_data["audit_completion_rate"], 2)
+        },
+        "charts": charts,
+        "ai_insights": ai_insights,
+        "generated_at": datetime.now().isoformat()
+    }
+
 
 @router.get("/analytics/dashboard")
 def get_admin_dashboard_analytics(

@@ -1,6 +1,15 @@
-from pydantic import BaseModel
-from typing import Optional, List
+from pydantic import BaseModel, field_validator
+from typing import Optional, List, Generic, TypeVar
 from datetime import datetime, date
+
+T = TypeVar('T')
+
+class PaginatedResponse(BaseModel, Generic[T]):
+    items: List[T]
+    total: int
+    page: int
+    per_page: int
+    pages: int
 
 # Store Rack Schemas
 class StoreRackBase(BaseModel):
@@ -47,6 +56,13 @@ class StockItemBase(BaseModel):
     unit_price: Optional[float] = None
     selling_price: Optional[float] = None
     profit_margin: Optional[float] = None
+
+    @field_validator('expiry_date', 'manufacturing_date', mode='before')
+    @classmethod
+    def empty_str_to_none(cls, v):
+        if v == '' or v == 'None' or v == 'null':
+            return None
+        return v
 
 class StockItemCreate(StockItemBase):
     section_id: Optional[int] = None

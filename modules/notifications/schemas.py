@@ -1,7 +1,7 @@
 from pydantic import BaseModel, field_validator
 from typing import List, Optional
 from datetime import datetime
-from .models import NotificationType, NotificationTargetType
+from .models import NotificationType, NotificationTargetType, StaffRequestStatus
 
 class NotificationCreate(BaseModel):
     title: str
@@ -54,3 +54,41 @@ class NotificationListResponse(BaseModel):
     notifications: List[NotificationResponse]
     unread_count: int
     total_count: int
+
+
+# Staff Request Schemas
+class StaffRequestCreate(BaseModel):
+    title: str
+    message: str
+
+    @field_validator('title')
+    @classmethod
+    def validate_title(cls, v):
+        if len(v) > 200:
+            raise ValueError('Title cannot exceed 200 characters')
+        if not v.strip():
+            raise ValueError('Title cannot be empty')
+        return v.strip()
+
+    @field_validator('message')
+    @classmethod
+    def validate_message(cls, v):
+        if not v.strip():
+            raise ValueError('Message cannot be empty')
+        return v.strip()
+
+
+class StaffRequestResponse(BaseModel):
+    id: int
+    staff_id: int
+    staff_name: str
+    shop_id: int
+    title: str
+    message: str
+    status: StaffRequestStatus
+    acknowledged_by: Optional[str] = None
+    acknowledged_at: Optional[datetime] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True

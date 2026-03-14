@@ -11,6 +11,8 @@ class PaymentStatusEnum(str, Enum):
 class PaymentMethodEnum(str, Enum):
     UPI = "upi"
     BANK = "bank"
+    BANK_TRANSFER = "bank_transfer"
+    CASH = "cash"
 
 class AlertTypeEnum(str, Enum):
     UPCOMING = "upcoming"
@@ -67,7 +69,7 @@ class SalaryRecordUpdate(BaseModel):
     notes: Optional[str] = None
 
 class SalaryPayment(BaseModel):
-    paid_by_admin: str
+    paid_by_admin: Optional[str] = None
     notes: Optional[str] = None
 
 class SalaryRecord(BaseModel):
@@ -145,6 +147,7 @@ class MonthlySalarySummary(BaseModel):
     total_salary_amount: float
     paid_amount: float
     pending_amount: float
+    overdue_amount: float
 
 class StaffSalaryHistory(BaseModel):
     staff_id: int

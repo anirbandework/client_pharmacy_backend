@@ -3,8 +3,8 @@ from sqlalchemy import and_, or_, func
 from typing import List, Optional
 from datetime import datetime
 from .models import (
-    Notification, NotificationShopTarget, NotificationStaffTarget, 
-    NotificationRead, NotificationTargetType
+    Notification, NotificationShopTarget, NotificationStaffTarget,
+    NotificationRead, NotificationTargetType, StaffRequest, StaffRequestStatus
 )
 from modules.auth.models import Admin, Staff, Shop
 from . import schemas
@@ -242,9 +242,112 @@ class NotificationService:
     def get_admin_notifications(
         db: Session,
         admin: Admin,
+        shop_code: Optional[str] = None,
         limit: int = 50
     ) -> List[Notification]:
-        """Get notifications sent by admin"""
-        return db.query(Notification).filter(
-            Notification.admin_id == admin.id
-        ).order_by(Notification.created_at.desc()).limit(limit).all()
+        """Get notifications sent by admin, optionally filtered to those targeting a specific shop"""
+        query = db.query(Notification).filter(Notification.admin_id == admin.id)
+
+        if shop_code:
+            shop = db.query(Shop).filter(
+                Shop.shop_code == shop_code,
+                Shop.organization_id == admin.organization_id
+            ).first()
+            if shop:
+                query = query.filter(
+                    Notification.id.in_(
+                        db.query(NotificationShopTarget.notification_id).filter(
+                            NotificationShopTarget.shop_id == shop.id
+                        )
+                    )
+                )
+
+        return query.order_by(Notification.created_at.desc()).limit(limit).all()
+
+    # ── Staff Requests ────────────────────────────────────────────────────────
+
+    @staticmethod
+    def create_staff_request(
+        db: Session,
+        staff: Staff,
+        data: schemas.StaffRequestCreate
+    ) -> StaffRequest:
+        """Staff sends a request/message to their shop admin"""
+        req = StaffRequest(
+            staff_id=staff.id,
+            staff_name=staff.name,
+            shop_id=staff.shop_id,
+            title=data.title,
+            message=data.message,
+        )
+        db.add(req)
+        db.commit()
+        db.refresh(req)
+        return req
+
+    @staticmethod
+    def get_staff_own_requests(
+        db: Session,
+        staff: Staff,
+        limit: int = 50
+    ) -> List[StaffRequest]:
+        """Staff views their own sent requests"""
+        return db.query(StaffRequest).filter(
+            StaffRequest.staff_id == staff.id
+        ).order_by(StaffRequest.created_at.desc()).limit(limit).all()
+
+    @staticmethod
+    def get_admin_staff_requests(
+        db: Session,
+        admin: Admin,
+        shop_code: Optional[str] = None,
+        status: Optional[str] = None,
+        limit: int = 100
+    ) -> List[StaffRequest]:
+        """Admin views staff requests, optionally filtered by shop"""
+        if shop_code:
+            shop = db.query(Shop).filter(
+                Shop.shop_code == shop_code,
+                Shop.organization_id == admin.organization_id
+            ).first()
+            if not shop:
+                return []
+            shop_ids = [shop.id]
+        else:
+            shop_ids = [sid[0] for sid in db.query(Shop.id).filter(
+                Shop.organization_id == admin.organization_id
+            ).all()]
+
+        query = db.query(StaffRequest).filter(StaffRequest.shop_id.in_(shop_ids))
+        if status:
+            query = query.filter(StaffRequest.status == status)
+        return query.order_by(StaffRequest.created_at.desc()).limit(limit).all()
+
+    @staticmethod
+    def acknowledge_staff_request(
+        db: Session,
+        request_id: int,
+        admin: Admin,
+        dismiss: bool = False
+    ) -> StaffRequest:
+        """Admin acknowledges or dismisses a staff request"""
+        # Verify admin owns this request's shop
+        org_shop_ids = db.query(Shop.id).filter(
+            Shop.organization_id == admin.organization_id
+        ).all()
+        org_shop_ids = [sid[0] for sid in org_shop_ids]
+
+        req = db.query(StaffRequest).filter(
+            StaffRequest.id == request_id,
+            StaffRequest.shop_id.in_(org_shop_ids)
+        ).first()
+
+        if not req:
+            return None
+
+        req.status = StaffRequestStatus.DISMISSED if dismiss else StaffRequestStatus.ACKNOWLEDGED
+        req.acknowledged_by = admin.full_name
+        req.acknowledged_at = datetime.now()
+        db.commit()
+        db.refresh(req)
+        return req

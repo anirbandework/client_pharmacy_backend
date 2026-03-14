@@ -366,7 +366,7 @@ def get_invoices(
     if end_date:
         query = query.filter(models.PurchaseInvoice.invoice_date <= end_date)
     
-    invoices = query.order_by(models.PurchaseInvoice.invoice_date.desc()).offset(skip).limit(limit).all()
+    invoices = query.order_by(models.PurchaseInvoice.created_at.desc()).offset(skip).limit(limit).all()
     
     # Add item count and verified_by_name
     result = []
