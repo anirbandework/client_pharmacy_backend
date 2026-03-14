@@ -424,7 +424,7 @@ def get_analytics_overview(
             "avg_daily_prediction": round(prediction_next_7_days / 7, 2)
         }
     }
-    dashboard_cache.set(cache_key, result)
+    dashboard_cache.set(cache_key, result, ttl=60)
     return result
 
 @router.get("/analytics/comparison")
@@ -493,7 +493,7 @@ def get_period_comparison(
             "expenses_change": round(calc_change(current["expenses"], previous["expenses"]), 2)
         }
     }
-    dashboard_cache.set(cache_key, result)
+    dashboard_cache.set(cache_key, result, ttl=60)
     return result
 
 # ─── DAILY RECORDS ────────────────────────────────────────────────────────────

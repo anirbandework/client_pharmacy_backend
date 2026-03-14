@@ -140,14 +140,6 @@ def get_wifi_status(
         models.AttendanceRecord.date == today
     ).first()
     
-    # Fix any incorrectly created records (check_in_time == check_out_time)
-    if attendance and attendance.check_in_time and attendance.check_out_time:
-        if attendance.check_in_time == attendance.check_out_time:
-            attendance.check_out_time = None
-            attendance.status = 'present'
-            attendance.last_error = None
-            db.commit()
-    
     # Get settings
     settings = db.query(models.AttendanceSettings).filter(
         models.AttendanceSettings.shop_id == shop_id
@@ -243,7 +235,6 @@ def setup_shop_wifi(
     
     if existing:
         existing.wifi_ssid = wifi_data.wifi_ssid
-        existing.wifi_password = wifi_data.wifi_password
         existing.shop_latitude = wifi_data.shop_latitude
         existing.shop_longitude = wifi_data.shop_longitude
         existing.geofence_radius_meters = wifi_data.geofence_radius_meters or 100
@@ -255,7 +246,6 @@ def setup_shop_wifi(
     shop_wifi = models.ShopWiFi(
         shop_id=shop_id,
         wifi_ssid=wifi_data.wifi_ssid,
-        wifi_password=wifi_data.wifi_password,
         shop_latitude=wifi_data.shop_latitude,
         shop_longitude=wifi_data.shop_longitude,
         geofence_radius_meters=wifi_data.geofence_radius_meters or 100
@@ -694,32 +684,31 @@ def approve_leave(
 @router.put("/leave/{leave_id}/reject", response_model=schemas.LeaveRequest)
 def reject_leave(
     leave_id: int,
-    update_data: schemas.LeaveRequestUpdate,
+    update_data: schemas.LeaveRequestReject,
     current_user: tuple = Depends(get_current_attendance_user),
     db: Session = Depends(get_db)
 ):
     """Reject leave request (Admin only)"""
-    
+
     user, shop_id, user_type = current_user
-    
-    # Only admin can reject leaves
+
     if user_type != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
-    
+
     leave = db.query(models.LeaveRequest).filter(
         models.LeaveRequest.id == leave_id,
         models.LeaveRequest.shop_id == shop_id
     ).first()
-    
+
     if not leave:
         raise HTTPException(status_code=404, detail="Leave request not found")
-    
+
     leave.status = "rejected"
     leave.approved_by = user.full_name
     leave.approved_at = datetime.now()
     leave.rejection_reason = update_data.rejection_reason
-    
+
     db.commit()
     db.refresh(leave)
-    
+
     return leave

@@ -342,8 +342,9 @@ def get_monthly_salary_summary(
     
     total_amount = sum(r.salary_amount for r in records)
     paid_amount = sum(r.salary_amount for r in records if r.payment_status == models.PaymentStatus.PAID.value)
-    pending_amount = total_amount - paid_amount
-    
+    pending_amount = sum(r.salary_amount for r in records if r.payment_status == models.PaymentStatus.PENDING.value)
+    overdue_amount = sum(r.salary_amount for r in records if r.payment_status == models.PaymentStatus.OVERDUE.value)
+
     return schemas.MonthlySalarySummary(
         month=month,
         year=year,
@@ -353,7 +354,8 @@ def get_monthly_salary_summary(
         overdue_count=overdue_count,
         total_salary_amount=total_amount,
         paid_amount=paid_amount,
-        pending_amount=pending_amount
+        pending_amount=pending_amount,
+        overdue_amount=overdue_amount
     )
 
 # STAFF ROUTES

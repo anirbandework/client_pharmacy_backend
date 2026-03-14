@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.database.database import get_db
 from datetime import datetime, date, timedelta
 from typing import Optional
+import math
 from .. import schemas, models
 from .admin_analytics_service import StockAuditAnalytics
 from .admin_ai_analytics_service import StockAuditAIAnalytics
@@ -450,6 +451,73 @@ def get_admin_stock_items(
 
     return {
         "items": result,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "pages": math.ceil(total / per_page) if total > 0 else 1
+    }
+
+
+@router.get("/items/consolidated")
+def get_consolidated_stock_items(
+    shop_id: Optional[int] = Query(None),
+    search: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    admin = Depends(get_current_admin)
+):
+    """Get stock items grouped by product_name + composition with per-batch breakdown (org-scoped)"""
+    from collections import defaultdict
+    query = (
+        db.query(models.StockItem)
+        .join(Shop, models.StockItem.shop_id == Shop.id)
+        .filter(Shop.organization_id == admin.organization_id)
+    )
+    if shop_id:
+        query = query.filter(models.StockItem.shop_id == shop_id)
+    if search:
+        s = f"%{search}%"
+        query = query.filter(
+            (models.StockItem.product_name.ilike(s)) |
+            (models.StockItem.composition.ilike(s))
+        )
+
+    shops = db.query(Shop).filter(Shop.organization_id == admin.organization_id).all()
+    shop_map = {s.id: s.shop_name for s in shops}
+
+    items = query.order_by(
+        models.StockItem.product_name,
+        models.StockItem.composition,
+        models.StockItem.batch_number
+    ).all()
+
+    groups = defaultdict(lambda: {
+        "batches": [], "total_qty_software": 0, "total_qty_physical": 0
+    })
+    for item in items:
+        key = (item.product_name or '', item.composition or '', item.shop_id)
+        g = groups[key]
+        g["product_name"] = item.product_name
+        g["composition"] = item.composition
+        g["shop_id"] = item.shop_id
+        g["shop_name"] = shop_map.get(item.shop_id, "Unknown")
+        g["total_qty_software"] += (item.quantity_software or 0)
+        g["total_qty_physical"] += (item.quantity_physical or 0)
+        g["batches"].append({
+            "batch_number": item.batch_number,
+            "expiry_date": item.expiry_date.isoformat() if item.expiry_date else None,
+            "qty_software": item.quantity_software or 0,
+            "qty_physical": item.quantity_physical or 0,
+        })
+
+    result = sorted(groups.values(), key=lambda x: (x.get("product_name") or "").lower())
+    for r in result:
+        r["batch_count"] = len(r["batches"])
+    total = len(result)
+    start = (page - 1) * per_page
+    return {
+        "items": result[start: start + per_page],
         "total": total,
         "page": page,
         "per_page": per_page,

@@ -48,7 +48,7 @@ from modules.auth.attendance.models import (
     AttendanceSettings, LeaveRequest
 )
 from modules.notifications.models import (
-    Notification, NotificationShopTarget, NotificationStaffTarget, NotificationRead
+    Notification, NotificationShopTarget, NotificationStaffTarget, NotificationRead, StaffRequest
 )
 from modules.invoice_analyzer_v2.models import PurchaseInvoice, PurchaseInvoiceItem
 from modules.distributor_invoice.models import DistributorInvoice, DistributorInvoiceItem

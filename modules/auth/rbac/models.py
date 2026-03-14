@@ -28,8 +28,9 @@ MODULE_TABS = {
         {"tab_key": "audit",        "tab_label": "Audit"},
         {"tab_key": "adjustments",  "tab_label": "Adjustments"},
         {"tab_key": "reports",      "tab_label": "Reports"},
-        {"tab_key": "ai-analytics", "tab_label": "AI Analytics"},
-        {"tab_key": "dashboard",    "tab_label": "Dashboard"},
+        {"tab_key": "ai-analytics",  "tab_label": "AI Analytics"},
+        {"tab_key": "dashboard",     "tab_label": "Dashboard"},
+        {"tab_key": "consolidated",  "tab_label": "Stock View"},
     ],
 
     # ── ADMIN MODULE ──────────────────────────────────────────────────────────
@@ -44,6 +45,55 @@ MODULE_TABS = {
         {"tab_key": "ai-insights",   "tab_label": "AI Insights"},
     ],
 
+    # ── STAFF MODULE ──────────────────────────────────────────────────────────
+    # Salary (staff): /my-salary
+    "my_salary": [
+        {"tab_key": "profile", "tab_label": "Profile"},
+        {"tab_key": "payment", "tab_label": "Payment Info"},
+        {"tab_key": "history", "tab_label": "History"},
+    ],
+
+    # ── ADMIN MODULE ──────────────────────────────────────────────────────────
+    # Salary (admin): /salary-management
+    "salary_management": [
+        {"tab_key": "dashboard", "tab_label": "Dashboard"},
+        {"tab_key": "records",   "tab_label": "Salary Records"},
+    ],
+
+    # ── STAFF MODULE ──────────────────────────────────────────────────────────
+    # Attendance (staff): /my-attendance
+    "attendance_staff": [
+        {"tab_key": "status",  "tab_label": "Status & Today"},
+        {"tab_key": "leaves",  "tab_label": "Leave Requests"},
+        {"tab_key": "history", "tab_label": "History"},
+    ],
+
+    # ── ADMIN MODULE ──────────────────────────────────────────────────────────
+    # Attendance (admin): /attendance
+    "attendance_admin": [
+        {"tab_key": "dashboard", "tab_label": "Dashboard"},
+        {"tab_key": "connected", "tab_label": "Connected Staff"},
+        {"tab_key": "records",   "tab_label": "Attendance Records"},
+        {"tab_key": "wifi",      "tab_label": "WiFi Setup"},
+        {"tab_key": "report",    "tab_label": "Monthly Report"},
+        {"tab_key": "leaves",    "tab_label": "Leave Management"},
+        {"tab_key": "settings",  "tab_label": "Settings"},
+    ],
+
+    # ── STAFF MODULE ──────────────────────────────────────────────────────────
+    # Notifications (staff): /my-notifications
+    "my_notifications": [
+        {"tab_key": "inbox",    "tab_label": "Inbox"},
+        {"tab_key": "requests", "tab_label": "My Requests"},
+    ],
+
+    # ── ADMIN MODULE ──────────────────────────────────────────────────────────
+    # Notifications (admin): /notifications
+    "notifications_admin": [
+        {"tab_key": "sent",     "tab_label": "Sent"},
+        {"tab_key": "requests", "tab_label": "Staff Requests"},
+    ],
+
     # ── ADMIN MODULE ──────────────────────────────────────────────────────────
     # Stock Analytics (admin): /stock-analytics
     "stock_analytics": [
@@ -54,6 +104,7 @@ MODULE_TABS = {
         {"tab_key": "dashboard",           "tab_label": "Dashboard"},
         {"tab_key": "discrepancies",       "tab_label": "Discrepancies"},
         {"tab_key": "excel-verification",  "tab_label": "Excel Verification"},
+        {"tab_key": "consolidated",        "tab_label": "Stock View"},
     ],
 }
 

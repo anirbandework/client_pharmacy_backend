@@ -120,7 +120,8 @@ class DailyRecordsService:
             **expense_data
         )
         db.add(expense)
-        
+        db.flush()  # flush so the new expense is visible to the sum query below
+
         # Update total expenses in daily record
         record = db.query(DailyRecord).filter(DailyRecord.id == daily_record_id).first()
         if record:

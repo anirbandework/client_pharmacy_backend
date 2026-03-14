@@ -4,6 +4,11 @@ from datetime import datetime
 from app.database.database import Base
 import enum
 
+class StaffRequestStatus(str, enum.Enum):
+    PENDING = "pending"
+    ACKNOWLEDGED = "acknowledged"
+    DISMISSED = "dismissed"
+
 class NotificationType(str, enum.Enum):
     INFO = "info"
     WARNING = "warning"
@@ -67,14 +72,40 @@ class NotificationStaffTarget(Base):
 class NotificationRead(Base):
     """Track which staff have read notifications"""
     __tablename__ = "notification_reads"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     notification_id = Column(Integer, ForeignKey("notifications.id"), nullable=False)
     staff_id = Column(Integer, ForeignKey("staff.id"), nullable=False, index=True)
     staff_name = Column(String, nullable=False)  # Audit trail
     shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False, index=True)  # Shop-level filtering
     read_at = Column(DateTime, default=datetime.now)
-    
+
     notification = relationship("Notification", back_populates="reads")
+    staff = relationship("Staff")
+    shop = relationship("Shop")
+
+
+class StaffRequest(Base):
+    """Requests/messages sent by staff to their shop admin"""
+    __tablename__ = "staff_requests"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    # Sender
+    staff_id = Column(Integer, ForeignKey("staff.id"), nullable=False, index=True)
+    staff_name = Column(String, nullable=False)
+    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False, index=True)
+
+    # Content
+    title = Column(String(200), nullable=False)
+    message = Column(Text, nullable=False)
+
+    # Status
+    status = Column(SQLEnum(StaffRequestStatus), default=StaffRequestStatus.PENDING, nullable=False)
+    acknowledged_by = Column(String, nullable=True)  # Admin name
+    acknowledged_at = Column(DateTime, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.now, index=True)
+
     staff = relationship("Staff")
     shop = relationship("Shop")

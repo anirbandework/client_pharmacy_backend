@@ -1,4 +1,4 @@
-from pydantic import BaseModel, field_validator, field_serializer
+from pydantic import BaseModel, Field, field_validator, field_serializer
 from datetime import datetime, date, time
 from typing import Optional, List
 
@@ -8,7 +8,7 @@ class ShopWiFiCreate(BaseModel):
     wifi_password: Optional[str] = None
     shop_latitude: str  # Required
     shop_longitude: str  # Required
-    geofence_radius_meters: int = 100
+    geofence_radius_meters: int = Field(default=100, ge=10, le=1000)
 
 class ShopWiFi(BaseModel):
     id: int
@@ -143,13 +143,16 @@ class LeaveRequestCreate(BaseModel):
 class LeaveRequestUpdate(BaseModel):
     status: str  # approved, rejected
     rejection_reason: Optional[str] = None
-    
+
     @field_validator('status')
     @classmethod
     def validate_status(cls, v):
         if v not in ['approved', 'rejected']:
             raise ValueError('Status must be approved or rejected')
         return v
+
+class LeaveRequestReject(BaseModel):
+    rejection_reason: Optional[str] = None
 
 class LeaveRequest(BaseModel):
     id: int

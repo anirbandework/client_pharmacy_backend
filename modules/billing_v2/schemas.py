@@ -107,6 +107,7 @@ class MedicineSearchResult(BaseModel):
     quantity_available: int
     mrp: Optional[str]
     unit_price: Optional[float]
+    selling_price: Optional[float]
     rack_number: Optional[str]
     section_name: Optional[str]
     expiry_date: Optional[str]
