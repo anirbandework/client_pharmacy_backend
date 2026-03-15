@@ -39,9 +39,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     
     # High-frequency endpoints (lightweight rate limiting)
     HIGH_FREQUENCY_LIMITS = {
-        "/api/attendance/wifi/heartbeat": {"limit": 2, "window": 60},  # 2/min = every 30s (matches heartbeat)
-        "/api/attendance/wifi/status": {"limit": 30, "window": 60},    # 30/min = every 2s (reduced from 120)
-        "/api/notifications/staff/unread-count": {"limit": 30, "window": 60}  # 30/min = every 2s (reduced from 120)
+        # Removed - now in SKIP_RATE_LIMIT for no limits
     }
     
     # Skip rate limiting entirely
@@ -66,6 +64,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # Frequently polled endpoints - skip rate limiting
         "/api/attendance/wifi/info",
         "/api/attendance/wifi/status",
+        "/api/attendance/wifi/heartbeat",
         "/api/feedback/my-feedback/unread-count"
     ]
     
