@@ -9,9 +9,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     
     # User type limits (requests per minute)
     USER_TYPE_LIMITS = {
-        "super_admin": 500,
-        "admin": 300,
-        "staff": 300,  # Increased from 200 for stock operations
+        "super_admin": 10000,  # No practical limit
+        "admin": 2000,  # High limit for admin operations
+        "staff": 2000,  # High limit for staff operations
         "anonymous": 20
     }
     
@@ -62,12 +62,17 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # Auth verification endpoints - needed for frontend auth checks
         "/api/auth/staff/me",
         "/api/auth/admin/me",
-        "/api/rbac/my-permissions"
+        "/api/rbac/my-permissions",
+        # Frequently polled endpoints - skip rate limiting
+        "/api/attendance/wifi/info",
+        "/api/attendance/wifi/status",
+        "/api/feedback/my-feedback/unread-count"
     ]
     
     # Skip rate limiting for specific patterns
     SKIP_PATTERNS = [
-        # Remove blanket skip for stock audit - too risky for production
+        "/api/notifications/staff/list",  # Notification list endpoint
+        "/api/notifications/admin/list",  # Admin notification list
     ]
     
     def _create_rate_limit_response(self, retry_after: int):
