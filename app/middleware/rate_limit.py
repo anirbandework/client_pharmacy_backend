@@ -58,7 +58,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         "/api/auth/super-admin/admins",
         "/api/auth/super-admin/shops",
         "/api/auth/super-admin/staff",
-        "/api/auth/super-admin/organizations"
+        "/api/auth/super-admin/organizations",
+        # Auth verification endpoints - needed for frontend auth checks
+        "/api/auth/staff/me",
+        "/api/auth/admin/me",
+        "/api/rbac/my-permissions"
     ]
     
     # Skip rate limiting for specific patterns
