@@ -294,6 +294,221 @@ def get_consolidated_stock_items(
     }
 
 
+@router.get("/items/product-detail")
+def get_product_detail(
+    product_name: str = Query(...),
+    composition: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: tuple = Depends(get_current_user)
+):
+    """Get comprehensive product detail card — purchases, sales, vendors, forecasting, customers, etc."""
+    from collections import defaultdict
+    from sqlalchemy import func as sqlfunc
+    from modules.invoice_analyzer_v2.models import PurchaseInvoice, PurchaseInvoiceItem
+    from modules.billing_v2.models import Bill, BillItem
+
+    staff, shop_id = current_user
+
+    # ── Stock items ──────────────────────────────────────────────
+    stock_q = db.query(models.StockItem).filter(
+        models.StockItem.shop_id == shop_id,
+        models.StockItem.product_name.ilike(product_name)
+    )
+    if composition:
+        stock_q = stock_q.filter(models.StockItem.composition.ilike(composition))
+    stock_items = stock_q.all()
+
+    batches = []
+    total_current_value = 0.0
+    hsn_code = None
+    gst_percent = None
+
+    for si in stock_items:
+        section_name = None
+        rack_name = None
+        if si.section_id:
+            section = db.query(models.StockSection).filter(models.StockSection.id == si.section_id).first()
+            if section:
+                section_name = section.section_name
+                rack = db.query(models.StockRack).filter(models.StockRack.id == section.rack_id).first()
+                if rack:
+                    rack_name = rack.rack_number
+        qty = si.quantity_software or 0
+        total_current_value += qty * (si.unit_price or 0.0)
+        if not hsn_code and si.hsn_code:
+            hsn_code = si.hsn_code
+        batches.append({
+            "batch_number": si.batch_number,
+            "expiry_date": si.expiry_date.isoformat() if si.expiry_date else None,
+            "qty_software": si.quantity_software or 0,
+            "qty_physical": si.quantity_physical,
+            "mrp": si.mrp,
+            "unit_price": si.unit_price,
+            "selling_price": si.selling_price,
+            "manufacturer": si.manufacturer,
+            "section_name": section_name,
+            "rack_name": rack_name,
+        })
+
+    current_quantity = sum(b["qty_software"] for b in batches)
+
+    # ── Purchase invoice data ─────────────────────────────────────
+    purchase_rows = db.query(PurchaseInvoiceItem, PurchaseInvoice).join(
+        PurchaseInvoice, PurchaseInvoiceItem.invoice_id == PurchaseInvoice.id
+    ).filter(
+        PurchaseInvoice.shop_id == shop_id,
+        PurchaseInvoice.is_admin_verified == True,
+        PurchaseInvoiceItem.product_name.ilike(product_name)
+    ).all()
+
+    distinct_invoices = {inv.id for _, inv in purchase_rows}
+    total_purchases = len(distinct_invoices)
+    total_purchase_value = sum((pi.total_amount or 0.0) for pi, _ in purchase_rows)
+
+    if not gst_percent and purchase_rows:
+        s = purchase_rows[0][0]
+        g = (s.cgst_percent or 0.0) + (s.sgst_percent or 0.0)
+        if g > 0:
+            gst_percent = g
+
+    vendor_map = defaultdict(lambda: {"purchase_count": 0, "total_cost": 0.0, "qty": 0, "last_purchase_date": None})
+    manufacturers = set()
+    for pi, inv in purchase_rows:
+        v = inv.supplier_name or "Unknown"
+        vendor_map[v]["purchase_count"] += 1
+        vendor_map[v]["total_cost"] += (pi.unit_price or 0.0) * (pi.quantity or 0)
+        vendor_map[v]["qty"] += (pi.quantity or 0)
+        if inv.invoice_date and (vendor_map[v]["last_purchase_date"] is None or inv.invoice_date > vendor_map[v]["last_purchase_date"]):
+            vendor_map[v]["last_purchase_date"] = inv.invoice_date
+        if pi.manufacturer:
+            manufacturers.add(pi.manufacturer)
+
+    vendors = []
+    for vname, vd in vendor_map.items():
+        avg_price = vd["total_cost"] / vd["qty"] if vd["qty"] > 0 else 0.0
+        vendors.append({
+            "supplier_name": vname,
+            "purchase_count": vd["purchase_count"],
+            "avg_unit_price": round(avg_price, 2),
+            "last_purchase_date": vd["last_purchase_date"].isoformat() if vd["last_purchase_date"] else None,
+        })
+
+    most_suitable_vendor = None
+    suboptimal_purchases = 0
+    if vendors:
+        vendors_sorted = sorted(vendors, key=lambda x: x["avg_unit_price"])
+        most_suitable_vendor = vendors_sorted[0]["supplier_name"]
+        suboptimal_purchases = sum(v["purchase_count"] for v in vendors if v["supplier_name"] != most_suitable_vendor)
+
+    # ── Billing / sales data ──────────────────────────────────────
+    bill_rows = db.query(BillItem, Bill).join(
+        Bill, BillItem.bill_id == Bill.id
+    ).filter(
+        Bill.shop_id == shop_id,
+        BillItem.item_name.ilike(product_name)
+    ).all()
+
+    total_times_sold = len({bill.id for _, bill in bill_rows})
+    total_qty_sold = sum(bi.quantity or 0 for bi, _ in bill_rows)
+    total_sales_value = sum(bi.total_price or 0.0 for bi, _ in bill_rows)
+
+    customer_map = defaultdict(lambda: {"name": None, "purchase_count": 0, "last_purchase": None})
+    staff_sales = defaultdict(int)
+    for bi, bill in bill_rows:
+        phone = bill.customer_phone or "Unknown"
+        customer_map[phone]["name"] = bill.customer_name
+        customer_map[phone]["purchase_count"] += 1
+        bd = bill.created_at.date() if bill.created_at else None
+        if bd and (customer_map[phone]["last_purchase"] is None or bd > customer_map[phone]["last_purchase"]):
+            customer_map[phone]["last_purchase"] = bd
+        if bill.staff_name:
+            staff_sales[bill.staff_name] += 1
+
+    customers = sorted(
+        [
+            {
+                "customer_phone": phone,
+                "customer_name": data["name"],
+                "purchase_count": data["purchase_count"],
+                "last_purchase": data["last_purchase"].isoformat() if data["last_purchase"] else None,
+            }
+            for phone, data in customer_map.items()
+            if phone != "Unknown"
+        ],
+        key=lambda x: x["purchase_count"],
+        reverse=True
+    )[:20]
+
+    top_staff = max(staff_sales, key=staff_sales.get) if staff_sales else None
+
+    # ── Sales velocity & forecasting ─────────────────────────────
+    avg_daily_sales = 0.0
+    days_stock_will_last = None
+    reorder_date = None
+
+    if bill_rows:
+        sale_dates = [bill.created_at.date() for _, bill in bill_rows if bill.created_at]
+        if sale_dates:
+            days_range = max((max(sale_dates) - min(sale_dates)).days, 1)
+            avg_daily_sales = total_qty_sold / days_range
+            if avg_daily_sales > 0 and current_quantity > 0:
+                days_stock_will_last = int(current_quantity / avg_daily_sales)
+                reorder_date = (date.today() + timedelta(days=max(days_stock_will_last - 7, 0))).isoformat()
+
+    # ── Revenue contribution % ────────────────────────────────────
+    today_date = date.today()
+    thirty_days_ago = today_date - timedelta(days=30)
+
+    product_daily_sales = sum(
+        bi.total_price or 0.0 for bi, bill in bill_rows
+        if bill.created_at and bill.created_at.date() == today_date
+    )
+    product_monthly_sales = sum(
+        bi.total_price or 0.0 for bi, bill in bill_rows
+        if bill.created_at and bill.created_at.date() >= thirty_days_ago
+    )
+
+    total_daily_revenue = db.query(sqlfunc.sum(Bill.total_amount)).filter(
+        Bill.shop_id == shop_id,
+        sqlfunc.date(Bill.created_at) == today_date
+    ).scalar() or 0.0
+
+    total_monthly_revenue = db.query(sqlfunc.sum(Bill.total_amount)).filter(
+        Bill.shop_id == shop_id,
+        Bill.created_at >= datetime(thirty_days_ago.year, thirty_days_ago.month, thirty_days_ago.day)
+    ).scalar() or 0.0
+
+    daily_revenue_pct = round(product_daily_sales / total_daily_revenue * 100, 2) if total_daily_revenue > 0 else None
+    monthly_revenue_pct = round(product_monthly_sales / total_monthly_revenue * 100, 2) if total_monthly_revenue > 0 else None
+
+    return {
+        "product_name": product_name,
+        "composition": composition or (stock_items[0].composition if stock_items else None),
+        "hsn_code": hsn_code,
+        "gst_percent": gst_percent,
+        "current_quantity": current_quantity,
+        "batch_count": len(batches),
+        "batches": batches,
+        "total_current_stock_value": round(total_current_value, 2),
+        "total_purchase_value_till_date": round(total_purchase_value, 2),
+        "total_sales_value_till_date": round(total_sales_value, 2),
+        "total_purchases": total_purchases,
+        "total_times_sold": total_times_sold,
+        "total_qty_sold": total_qty_sold,
+        "vendors": vendors,
+        "manufacturers": sorted(manufacturers),
+        "most_suitable_vendor": most_suitable_vendor,
+        "suboptimal_vendor_purchases": suboptimal_purchases,
+        "customers": customers,
+        "top_staff": top_staff,
+        "avg_daily_sales": round(avg_daily_sales, 2),
+        "days_stock_will_last": days_stock_will_last,
+        "reorder_date": reorder_date,
+        "daily_revenue_contribution_pct": daily_revenue_pct,
+        "monthly_revenue_contribution_pct": monthly_revenue_pct,
+    }
+
+
 @router.get("/items/{item_id}", response_model=schemas.StockItem)
 def get_stock_item(
     item_id: int,
