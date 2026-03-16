@@ -8,6 +8,22 @@ from datetime import datetime, date, timedelta
 from typing import List, Dict, Any, Optional
 import random
 import string
+import re
+import math
+
+
+def _parse_tablets_per_strip(package: str) -> int | None:
+    """Parse '10 X 10' or '40X6' → tablets_per_strip (the second number)."""
+    if not package:
+        return None
+    m = re.match(r"^\s*(\d+)\s*[xX*]\s*(\d+)\s*$", str(package).strip())
+    return int(m.group(2)) if m else None
+
+
+def _strips_to_deduct(tablet_qty: int, tablets_per_strip: int) -> int:
+    """Strips consumed when selling tablet_qty loose tablets.
+    Physically, opening a strip consumes the whole strip from inventory."""
+    return math.ceil(tablet_qty / tablets_per_strip)
 
 class BillingService:
     
@@ -94,22 +110,35 @@ class BillingService:
                 StockItem.id == item_data['stock_item_id'],
                 StockItem.shop_id == shop_id
             ).first()
-            
+
             if not stock_item:
                 raise ValueError(f"Stock item {item_data['stock_item_id']} not found")
-            
-            if stock_item.quantity_software < item_data['quantity']:
+
+            sale_unit = item_data.get('sale_unit', 'strip')
+            if sale_unit == 'tablet':
+                tps = _parse_tablets_per_strip(stock_item.package)
+                if not tps:
+                    raise ValueError(
+                        f"Cannot sell by tablet: package info missing for {stock_item.product_name}"
+                    )
+                required_strips = _strips_to_deduct(item_data['quantity'], tps)
+            else:
+                required_strips = item_data['quantity']
+
+            if stock_item.quantity_software < required_strips:
+                available = stock_item.quantity_software
+                unit_label = "strips"
                 raise ValueError(
                     f"Insufficient stock for {stock_item.product_name}. "
-                    f"Available: {stock_item.quantity_software}, Required: {item_data['quantity']}"
+                    f"Available: {available} {unit_label}, Required: {required_strips} {unit_label}"
                 )
-            
-            # Calculate item totals
+
+            # Calculate item totals (quantity × unit_price works for both strip and tablet modes)
             item_subtotal = item_data['quantity'] * item_data['unit_price']
             item_discount = item_subtotal * (item_data.get('discount_percent', 0) / 100)
             item_after_discount = item_subtotal - item_discount
             item_tax = item_after_discount * (item_data.get('tax_percent', 5.0) / 100)  # Default 5%
-            
+
             subtotal += item_subtotal
             tax_amount += item_tax
         
@@ -226,8 +255,15 @@ class BillingService:
             )
             db.add(bill_item)
             
-            # Update stock quantity and recalculate discrepancy
-            stock_item.quantity_software -= item_data['quantity']
+            # Update stock quantity (always deduct in strips)
+            sale_unit = item_data.get('sale_unit', 'strip')
+            if sale_unit == 'tablet':
+                tps = _parse_tablets_per_strip(stock_item.package)
+                strips_deducted = _strips_to_deduct(item_data['quantity'], tps)
+            else:
+                strips_deducted = item_data['quantity']
+
+            stock_item.quantity_software -= strips_deducted
             if stock_item.quantity_physical is not None:
                 stock_item.audit_discrepancy = stock_item.quantity_software - stock_item.quantity_physical
             stock_item.updated_at = datetime.now()

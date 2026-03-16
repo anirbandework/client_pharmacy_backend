@@ -5,11 +5,12 @@ from .models import PaymentMethod
 
 class BillItemCreate(BaseModel):
     stock_item_id: int
-    quantity: int
-    mrp: Optional[str] = None  # Maximum Retail Price (e.g., "69.00/STRIP")
-    unit_price: float  # Actual selling price
+    quantity: int                      # in strips OR tablets depending on sale_unit
+    mrp: Optional[str] = None         # Maximum Retail Price (e.g., "69.00/STRIP")
+    unit_price: float                  # selling price per strip or per tablet
     discount_percent: float = 0.0
-    tax_percent: float = 5.0  # Default 5% GST for medicines
+    tax_percent: float = 5.0          # Default 5% GST for medicines
+    sale_unit: str = 'strip'          # 'strip' or 'tablet'
 
 class BillItemResponse(BaseModel):
     id: int

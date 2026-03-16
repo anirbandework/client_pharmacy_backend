@@ -386,6 +386,7 @@ def get_admin_stock_items(
     search: Optional[str] = Query(None),
     composition: Optional[str] = Query(None),
     manufacturer: Optional[str] = Query(None),
+    batch_number: Optional[str] = Query(None),
     section_id: Optional[int] = Query(None),
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
@@ -412,6 +413,8 @@ def get_admin_stock_items(
         query = query.filter(models.StockItem.composition.ilike(f"%{composition}%"))
     if manufacturer:
         query = query.filter(models.StockItem.manufacturer.ilike(f"%{manufacturer}%"))
+    if batch_number:
+        query = query.filter(models.StockItem.batch_number.ilike(f"%{batch_number}%"))
     if section_id:
         query = query.filter(models.StockItem.section_id == section_id)
 
