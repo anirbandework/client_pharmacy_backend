@@ -86,8 +86,8 @@ def update_module_permission(
         service.models.OrganizationModulePermission.module_id == module.id
     ).first()
     
-    admin_enabled = permission_data.admin_enabled if permission_data.admin_enabled is not None else (existing.admin_enabled if existing else True)
-    staff_enabled = permission_data.staff_enabled if permission_data.staff_enabled is not None else (existing.staff_enabled if existing else True)
+    admin_enabled = permission_data.admin_enabled if permission_data.admin_enabled is not None else (existing.admin_enabled if existing else False)
+    staff_enabled = permission_data.staff_enabled if permission_data.staff_enabled is not None else (existing.staff_enabled if existing else False)
     
     permission = service.RBACService.update_organization_permissions(
         db=db,

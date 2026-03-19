@@ -29,7 +29,7 @@ from modules.billing_v2.admin.admin_routes import router as billing_admin_router
 from modules.auth.middleware import ShopContextMiddleware
 from modules.auth.attendance.wifi_middleware import WiFiEnforcementMiddleware
 from modules.auth.attendance.scheduler import start_scheduler, shutdown_scheduler
-from app.middleware.rate_limit import RateLimitMiddleware
+# from app.middleware.rate_limit import RateLimitMiddleware
 from app.core.config import settings
 from app.database.database import engine, Base
 from modules.customer_tracking.models import (
@@ -150,7 +150,7 @@ app.add_middleware(ShopContextMiddleware)
 app.add_middleware(WiFiEnforcementMiddleware)
 
 # Rate limiting middleware
-app.add_middleware(RateLimitMiddleware)
+# app.add_middleware(RateLimitMiddleware)
 
 # Module routes
 app.include_router(auth_router, prefix="/api/auth", tags=["Authentication"])

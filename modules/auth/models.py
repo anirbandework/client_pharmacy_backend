@@ -17,6 +17,10 @@ class SuperAdmin(Base):
     phone = Column(String(15), unique=True, index=True, nullable=False)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.now)
+    
+    # Password reset fields
+    reset_token = Column(String, nullable=True)
+    reset_token_expires = Column(DateTime, nullable=True)
 
 class Admin(Base):
     __tablename__ = "admins"
@@ -31,6 +35,10 @@ class Admin(Base):
     is_password_set = Column(Boolean, default=False)  # Track if user completed signup
     created_by_super_admin = Column(String, nullable=False)  # SuperAdmin name who created
     created_at = Column(DateTime, default=datetime.now)
+    
+    # Password reset fields
+    reset_token = Column(String, nullable=True)
+    reset_token_expires = Column(DateTime, nullable=True)
 
 class Shop(Base):
     __tablename__ = "shops"
@@ -92,6 +100,10 @@ class Staff(Base):
     can_manage_customers = Column(Boolean, default=True)
     
     is_password_set = Column(Boolean, default=False)  # Track if user completed signup
+    
+    # Password reset fields
+    reset_token = Column(String, nullable=True)
+    reset_token_expires = Column(DateTime, nullable=True)
     
     # Audit fields
     created_by_admin = Column(String, nullable=False)  # Admin name who created

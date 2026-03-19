@@ -152,6 +152,53 @@ class DistributorPasswordChange(BaseModel):
             raise ValueError('Password must be at least 6 characters')
         return v
 
+# Password Reset Schemas for Distributor
+class DistributorPasswordResetRequest(BaseModel):
+    phone: str
+    
+    @field_validator('phone')
+    @classmethod
+    def validate_phone(cls, v):
+        import re
+        phone = re.sub(r'[^\d+]', '', v)
+        phone = phone.replace('+', '')
+        if not phone.startswith('91') and len(phone) == 10:
+            phone = '91' + phone
+        phone = '+' + phone
+        if not re.match(r'^\+91\d{10}$', phone):
+            raise ValueError('Invalid Indian phone number')
+        return phone
+
+class DistributorPasswordResetVerifyOTP(BaseModel):
+    phone: str
+    otp: str
+    
+    @field_validator('phone')
+    @classmethod
+    def validate_phone(cls, v):
+        import re
+        phone = re.sub(r'[^\d+]', '', v)
+        phone = phone.replace('+', '')
+        if not phone.startswith('91') and len(phone) == 10:
+            phone = '91' + phone
+        phone = '+' + phone
+        if not re.match(r'^\+91\d{10}$', phone):
+            raise ValueError('Invalid Indian phone number')
+        return phone
+
+class DistributorPasswordResetConfirm(BaseModel):
+    reset_token: str
+    new_password: str
+    
+    @field_validator('new_password')
+    @classmethod
+    def validate_password(cls, v):
+        if len(v.encode('utf-8')) > 72:
+            raise ValueError('Password cannot be longer than 72 bytes')
+        if len(v) < 6:
+            raise ValueError('Password must be at least 6 characters')
+        return v
+
 class Distributor(BaseModel):
     id: int
     company_name: str

@@ -670,11 +670,12 @@ def get_invoice_summary(
     db: Session = Depends(get_db),
     current_user: tuple = Depends(get_current_user)
 ):
-    """Get invoice statistics summary"""
+    """Get invoice statistics summary (ADMIN-VERIFIED INVOICES ONLY)"""
     staff, shop_id = current_user
     
     query = db.query(models.PurchaseInvoice).filter(
-        models.PurchaseInvoice.shop_id == shop_id
+        models.PurchaseInvoice.shop_id == shop_id,
+        models.PurchaseInvoice.is_admin_verified == True
     )
     
     if start_date:

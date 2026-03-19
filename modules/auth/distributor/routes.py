@@ -327,3 +327,41 @@ def change_password(
     db.commit()
     
     return {"message": "Password changed successfully"}
+
+# PASSWORD RESET ROUTES FOR DISTRIBUTOR
+
+@router.post("/forgot-password")
+def forgot_password(
+    request: schemas.DistributorPasswordResetRequest,
+    db: Session = Depends(get_db)
+):
+    """Request password reset - sends OTP to phone"""
+    try:
+        result = OTPService.request_password_reset(db, request.phone, "distributor")
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/verify-reset-otp")
+def verify_reset_otp(
+    request: schemas.DistributorPasswordResetVerifyOTP,
+    db: Session = Depends(get_db)
+):
+    """Verify OTP and get reset token"""
+    try:
+        result = OTPService.verify_reset_otp(db, request.phone, request.otp, "distributor")
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/reset-password")
+def reset_password(
+    request: schemas.DistributorPasswordResetConfirm,
+    db: Session = Depends(get_db)
+):
+    """Reset password using reset token"""
+    try:
+        result = OTPService.reset_password_with_token(db, request.reset_token, request.new_password, "distributor")
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))

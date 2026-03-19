@@ -160,8 +160,8 @@ class OrganizationModulePermission(Base):
     module_id = Column(Integer, ForeignKey("modules.id"), nullable=False)
     
     # Permissions
-    admin_enabled = Column(Boolean, default=True)  # Can admin access this module?
-    staff_enabled = Column(Boolean, default=True)  # Can staff access this module?
+    admin_enabled = Column(Boolean, default=False)  # Can admin access this module?
+    staff_enabled = Column(Boolean, default=False)  # Can staff access this module?
     
     # Audit
     configured_by = Column(String, nullable=True)  # SuperAdmin who configured
