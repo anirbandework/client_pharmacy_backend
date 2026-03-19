@@ -54,32 +54,46 @@ class WiFiHeartbeatService:
                 "action": "error",
                 "message": f"WiFi '{wifi_ssid}' not registered for this shop"
             }
-        
-        # STRICT: Require location
-        if latitude is None or longitude is None:
-            return {
-                "action": "error",
-                "message": "Location is required for attendance. Please enable location services."
-            }
-        
-        # STRICT: Validate location is within geofence
-        from math import radians, sin, cos, sqrt, atan2
-        
-        R = 6371000  # Earth radius in meters
-        lat1, lon1 = radians(float(shop_wifi.shop_latitude)), radians(float(shop_wifi.shop_longitude))
-        lat2, lon2 = radians(latitude), radians(longitude)
-        
-        dlat = lat2 - lat1
-        dlon = lon2 - lon1
-        a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
-        c = 2 * atan2(sqrt(a), sqrt(1-a))
-        distance = R * c
-        
-        if distance > shop_wifi.geofence_radius_meters:
-            return {
-                "action": "error",
-                "message": f"You are {int(distance)}m away from shop. Must be within {shop_wifi.geofence_radius_meters}m to check in."
-            }
+
+        # Get attendance settings to check if geofence is required
+        settings = db.query(models.AttendanceSettings).filter(
+            models.AttendanceSettings.shop_id == shop_id
+        ).first()
+        geofence_required = settings.geofence_required if settings else True
+
+        if geofence_required:
+            # Require location
+            if latitude is None or longitude is None:
+                return {
+                    "action": "error",
+                    "message": "Location is required for attendance. Please enable location services."
+                }
+
+            # Validate location is within geofence
+            if not shop_wifi.shop_latitude or not shop_wifi.shop_longitude:
+                return {
+                    "action": "error",
+                    "message": "Shop location not configured. Please ask admin to set up geofence."
+                }
+
+            from math import radians, sin, cos, sqrt, atan2
+
+            R = 6371000  # Earth radius in meters
+            lat1, lon1 = radians(float(shop_wifi.shop_latitude)), radians(float(shop_wifi.shop_longitude))
+            lat2, lon2 = radians(latitude), radians(longitude)
+
+            dlat = lat2 - lat1
+            dlon = lon2 - lon1
+            a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
+            c = 2 * atan2(sqrt(a), sqrt(1-a))
+            distance = R * c
+
+            if distance > shop_wifi.geofence_radius_meters:
+                return {
+                    "action": "error",
+                    "message": f"You are {int(distance)}m away from shop. Must be within {shop_wifi.geofence_radius_meters}m to check in."
+                }
+        # If geofence not required: WiFi SSID match is sufficient — no GPS validation
         
         # Get or create device record
         device = None
@@ -172,12 +186,8 @@ class WiFiHeartbeatService:
         
         # Auto check-in
         check_in_time = datetime.now(LOCAL_TZ)  # Use local time
-        
-        # Get attendance settings to determine if late
-        settings = db.query(models.AttendanceSettings).filter(
-            models.AttendanceSettings.shop_id == shop_id
-        ).first()
-        
+
+        # settings already fetched above for geofence check
         is_late = False
         late_by_minutes = 0
         

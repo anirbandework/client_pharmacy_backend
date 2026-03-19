@@ -115,7 +115,7 @@ def admin_update_invoice(
     db: Session = Depends(get_db),
     admin: Admin = Depends(get_current_admin)
 ):
-    """Admin updates invoice before verification"""
+    """Admin updates invoice. If already admin-verified, reverses old stock sync and re-syncs with new items."""
     from modules.invoice_analyzer_v2 import models
     from modules.auth.models import Shop
 
@@ -126,6 +126,21 @@ def admin_update_invoice(
 
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
+
+    was_admin_verified = invoice.is_admin_verified
+
+    # If already admin-verified, reverse old stock BEFORE deleting old items
+    items_in_use = []
+    if was_admin_verified:
+        try:
+            from modules.invoice_analyzer_v2.stock_reversal_service import reverse_stock_for_invoice
+            _, items_in_use = reverse_stock_for_invoice(db, invoice, invoice_id, invoice.shop_id, reason="update")
+        except HTTPException:
+            raise
+        except Exception as e:
+            db.rollback()
+            logger.error(f"❌ Failed to reverse stock for invoice {invoice_id} during update: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to reverse stock before update: {str(e)}")
 
     # Update invoice fields (Pydantic already validated and parsed dates)
     invoice.invoice_number = invoice_data.invoice_number
@@ -208,6 +223,19 @@ def admin_update_invoice(
         )
         db.add(item)
 
+    # If invoice was already admin-verified, re-sync the new items to stock
+    if was_admin_verified:
+        try:
+            db.flush()  # Write new items to the transaction
+            db.expire(invoice)  # Expire cached invoice so sync re-reads fresh items from DB
+            from modules.stock_audit_v2.sync_service import InvoiceStockSyncService
+            sync_result = InvoiceStockSyncService.sync_invoice_to_stock(db, invoice_id, invoice.shop_id)
+            logger.info(f"✅ Re-synced stock for updated verified invoice {invoice_id}: {sync_result}")
+        except Exception as e:
+            db.rollback()
+            logger.error(f"❌ Failed to re-sync stock for invoice {invoice_id} after update: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to re-sync stock after update: {str(e)}")
+
     db.commit()
     db.refresh(invoice)
 
@@ -216,7 +244,13 @@ def admin_update_invoice(
     dashboard_cache.clear_prefix(f"dashboard:{admin.organization_id}")
     dashboard_cache.clear_prefix(f"ai_analytics:{admin.organization_id}")
 
-    return {"message": "Invoice updated successfully"}
+    response = {"message": "Invoice updated successfully"}
+    if items_in_use:
+        response["warning"] = (
+            f"{len(items_in_use)} item(s) were already sold in bills and had their stock quantity adjusted: "
+            + ", ".join(items_in_use)
+        )
+    return response
 
 @router.delete("/{invoice_id}/admin-delete")
 def admin_delete_invoice(

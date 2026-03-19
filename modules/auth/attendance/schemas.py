@@ -62,8 +62,8 @@ class StaffDevice(BaseModel):
 class WiFiHeartbeat(BaseModel):
     wifi_ssid: str
     mac_address: Optional[str] = None
-    latitude: float  # Required
-    longitude: float  # Required
+    latitude: Optional[float] = None  # Optional — only required when geofence_required=True
+    longitude: Optional[float] = None  # Optional — only required when geofence_required=True
 
 class AttendanceRecord(BaseModel):
     id: int
@@ -99,6 +99,7 @@ class AttendanceSettingsUpdate(BaseModel):
     grace_period_minutes: Optional[int] = None
     allow_any_network: Optional[bool] = None
     require_wifi_for_modules: Optional[bool] = None
+    geofence_required: Optional[bool] = None
     monday: Optional[bool] = None
     tuesday: Optional[bool] = None
     wednesday: Optional[bool] = None
@@ -115,6 +116,7 @@ class AttendanceSettings(BaseModel):
     grace_period_minutes: int
     allow_any_network: bool
     require_wifi_for_modules: bool
+    geofence_required: bool
     monday: bool
     tuesday: bool
     wednesday: bool

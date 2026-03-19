@@ -42,6 +42,8 @@ class Bill(Base):
     total_amount = Column(Float, nullable=False)
     amount_paid = Column(Float, nullable=False)
     change_returned = Column(Float, default=0.0)
+    payment_status = Column(String(20), default='paid', nullable=False)  # 'paid' | 'pay_later' | 'partial'
+    amount_due = Column(Float, default=0.0)
     
     # Additional info
     notes = Column(Text, nullable=True)
@@ -83,6 +85,7 @@ class BillItem(Base):
     
     # Pricing
     quantity = Column(Integer, nullable=False)
+    strips_deducted = Column(Integer, nullable=True)  # Actual strips removed from stock (differs from quantity when sale_unit='tablet')
     mrp = Column(String, nullable=True)  # Maximum Retail Price (e.g., "69.00/STRIP")
     unit_price = Column(Float, nullable=False)  # Actual selling price
     discount_percent = Column(Float, default=0.0)

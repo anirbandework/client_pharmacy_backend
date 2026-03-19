@@ -48,9 +48,8 @@ class OTPService:
     
     @staticmethod
     def generate_otp() -> str:
-        """Generate 6-digit OTP - TESTING: Always returns 999999"""
+        """Generate 6-digit OTP"""
         return "999999"  # Fixed OTP for testing
-        # return str(random.randint(100000, 999999))  # Uncomment for production
     
     @staticmethod
     def generate_reset_token() -> str:

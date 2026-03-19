@@ -95,6 +95,7 @@ class AttendanceSettings(Base):
     # WiFi enforcement
     allow_any_network = Column(Boolean, default=False)  # Emergency toggle by admin
     require_wifi_for_modules = Column(Boolean, default=True)  # Enforce WiFi for stock_audit, billing, etc.
+    geofence_required = Column(Boolean, default=True)  # If False, skip GPS/location check; WiFi SSID match is enough
     
     # Working days
     monday = Column(Boolean, default=True)

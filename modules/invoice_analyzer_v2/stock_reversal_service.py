@@ -6,11 +6,12 @@ import logging
 from datetime import datetime
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
+from modules.stock_audit_v2.sync_service import boxes_to_strips
 
 logger = logging.getLogger(__name__)
 
 
-def reverse_stock_for_invoice(db: Session, invoice, invoice_id: int, shop_id: int) -> tuple[bool, list[str]]:
+def reverse_stock_for_invoice(db: Session, invoice, invoice_id: int, shop_id: int, reason: str = "delete") -> tuple[bool, list[str]]:
     """
     Reverse stock quantities when an admin-verified invoice is deleted.
 
@@ -43,10 +44,11 @@ def reverse_stock_for_invoice(db: Session, invoice, invoice_id: int, shop_id: in
             if not stock_item:
                 continue
 
-            # Reverse the same quantity that was synced (billed + free)
+            # Reverse the same quantity that was synced (billed + free), converting
+            # boxes → strips exactly as sync_service does for tablet products.
             billed_qty = invoice_item.quantity or 0
             free_qty = invoice_item.free_quantity or 0
-            total_quantity = round(billed_qty + free_qty)
+            total_quantity = boxes_to_strips(billed_qty + free_qty, invoice_item.package)
 
             bill_item_count = db.query(BillItem).filter(
                 BillItem.stock_item_id == stock_item.id
@@ -89,6 +91,6 @@ def reverse_stock_for_invoice(db: Session, invoice, invoice_id: int, shop_id: in
     except Exception as e:
         logger.error(f"Failed to reverse stock quantities for invoice {invoice_id}: {e}")
         db.rollback()
-        raise HTTPException(status_code=400, detail=f"Cannot delete invoice: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Cannot {reason} invoice: stock reversal failed — {str(e)}")
 
     return stock_reversed, items_in_use

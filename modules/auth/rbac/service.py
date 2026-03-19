@@ -136,6 +136,16 @@ class RBACService:
             (models.OrganizationModulePermission.organization_id == organization_id)
         ).all()
 
+        # Modules that are relevant per user type (used to decide which locked modules to surface)
+        ADMIN_MODULE_KEYS = {
+            'admin_panel', 'attendance_admin', 'notifications_admin',
+            'salary_management', 'invoice_analytics', 'stock_analytics', 'billing_analytics'
+        }
+        STAFF_MODULE_KEYS = {
+            'billing', 'customer_tracking', 'purchase_invoice',
+            'stock_audit', 'attendance_staff', 'my_notifications', 'my_salary'
+        }
+
         result = []
         for module, permission in permissions:
             # If no permission record, use default
@@ -146,11 +156,15 @@ class RBACService:
                 admin_enabled = module.default_enabled
                 staff_enabled = module.default_enabled
 
-            # Filter based on user type
-            if user_type == "admin" and not admin_enabled:
-                continue
-            if user_type == "staff" and not staff_enabled:
-                continue
+            # Determine if this module is relevant for the requesting user type
+            if user_type == "admin" and module.module_key not in ADMIN_MODULE_KEYS:
+                continue  # Don't show staff-only modules to admin
+            if user_type == "staff" and module.module_key not in STAFF_MODULE_KEYS:
+                continue  # Don't show admin-only modules to staff
+
+            # Determine if this module is locked for the user (org doesn't have access)
+            is_locked = (user_type == "admin" and not admin_enabled) or \
+                        (user_type == "staff" and not staff_enabled)
 
             tab_permissions = RBACService.get_tab_permissions(db, organization_id, module.module_key)
 
@@ -158,7 +172,8 @@ class RBACService:
                 **module.__dict__,
                 admin_enabled=admin_enabled,
                 staff_enabled=staff_enabled,
-                tab_permissions=tab_permissions
+                tab_permissions=tab_permissions,
+                locked=is_locked
             ))
 
         return result

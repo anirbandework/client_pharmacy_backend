@@ -99,9 +99,15 @@ class InvoiceStockSyncService:
             ).first()
 
             if existing_item:
-                # Update quantity; also update unit_price to the latest per-strip cost
+                # Update quantity and refresh all metadata to reflect the latest invoice values.
+                # This ensures corrections (e.g. expiry date typo fixes) propagate to stock.
                 existing_item.quantity_software += total_quantity
                 existing_item.unit_price = unit_price
+                existing_item.expiry_date = invoice_item.expiry_date
+                existing_item.manufacturing_date = invoice_item.manufacturing_date
+                existing_item.mrp = invoice_item.mrp
+                existing_item.selling_price = invoice_item.selling_price
+                existing_item.package = invoice_item.package
                 existing_item.updated_at = datetime.now()
                 updated_items.append(existing_item.id)
                 logger.info(

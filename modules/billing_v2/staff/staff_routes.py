@@ -163,7 +163,9 @@ def delete_bill(
             StockItem.shop_id == shop_id
         ).first()
         if stock_item:
-            stock_item.quantity_software += item.quantity
+            # Use strips_deducted if available (new bills); fall back to quantity for legacy bills
+            restore_qty = item.strips_deducted if item.strips_deducted is not None else item.quantity
+            stock_item.quantity_software += restore_qty
             if stock_item.quantity_physical is not None:
                 stock_item.audit_discrepancy = stock_item.quantity_software - stock_item.quantity_physical
             stock_item.updated_at = datetime.now()
@@ -171,6 +173,48 @@ def delete_bill(
     db.delete(bill)
     db.commit()
     return {"message": "Bill deleted and stock restored"}
+
+# ─── PAY LATER ────────────────────────────────────────────────────────────────
+
+@router.get("/pay-later/customers")
+def get_pay_later_customers(
+    from_date: Optional[date] = None,
+    to_date: Optional[date] = None,
+    db: Session = Depends(get_db),
+    current_user: tuple = Depends(get_current_user)
+):
+    """Get all customers with outstanding Pay Later balances"""
+    staff, shop_id = current_user
+    return services.BillingService.get_pay_later_customers(db, shop_id, from_date, to_date)
+
+@router.get("/pay-later/bills/{customer_phone}")
+def get_pay_later_bills(
+    customer_phone: str,
+    db: Session = Depends(get_db),
+    current_user: tuple = Depends(get_current_user)
+):
+    """Get all outstanding Pay Later bills for a specific customer"""
+    staff, shop_id = current_user
+    bills = db.query(models.Bill).filter(
+        models.Bill.shop_id == shop_id,
+        models.Bill.customer_phone == customer_phone,
+        models.Bill.payment_status.in_(['pay_later', 'partial'])
+    ).order_by(models.Bill.created_at.asc()).all()
+    return bills
+
+@router.post("/pay-later/record-payment")
+def record_pay_later_payment(
+    payment: schemas.RecordPaymentRequest,
+    db: Session = Depends(get_db),
+    current_user: tuple = Depends(get_current_user)
+):
+    """Record a payment for a customer's outstanding Pay Later bills (FIFO order)"""
+    staff, shop_id = current_user
+    try:
+        result = services.BillingService.record_payment(db, shop_id, payment.model_dump())
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 # ─── REPORTS ──────────────────────────────────────────────────────────────────
 
