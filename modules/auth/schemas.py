@@ -292,3 +292,53 @@ class TokenData(BaseModel):
     shop_code: Optional[str] = None  # For staff
     email: Optional[str] = None
     user_name: Optional[str] = None
+
+# Password Reset Schemas
+class PasswordResetRequest(BaseModel):
+    phone: str
+    user_type: str  # super_admin, admin, staff, distributor
+    
+    @field_validator('phone')
+    @classmethod
+    def validate_phone(cls, v):
+        import re
+        phone = re.sub(r'[^\d+]', '', v)
+        phone = phone.replace('+', '')
+        if not phone.startswith('91') and len(phone) == 10:
+            phone = '91' + phone
+        phone = '+' + phone
+        if not re.match(r'^\+91\d{10}$', phone):
+            raise ValueError('Invalid Indian phone number')
+        return phone
+
+class PasswordResetVerifyOTP(BaseModel):
+    phone: str
+    otp: str
+    user_type: str  # super_admin, admin, staff, distributor
+    
+    @field_validator('phone')
+    @classmethod
+    def validate_phone(cls, v):
+        import re
+        phone = re.sub(r'[^\d+]', '', v)
+        phone = phone.replace('+', '')
+        if not phone.startswith('91') and len(phone) == 10:
+            phone = '91' + phone
+        phone = '+' + phone
+        if not re.match(r'^\+91\d{10}$', phone):
+            raise ValueError('Invalid Indian phone number')
+        return phone
+
+class PasswordResetConfirm(BaseModel):
+    reset_token: str
+    new_password: str
+    user_type: str  # super_admin, admin, staff, distributor
+    
+    @field_validator('new_password')
+    @classmethod
+    def validate_password(cls, v):
+        if len(v.encode('utf-8')) > 72:
+            raise ValueError('Password cannot be longer than 72 bytes')
+        if len(v) < 6:
+            raise ValueError('Password must be at least 6 characters')
+        return v

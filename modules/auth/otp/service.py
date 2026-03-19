@@ -2,6 +2,7 @@ import random
 import os
 import threading
 import requests
+import secrets
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from .models import OTPVerification
@@ -11,6 +12,7 @@ from ..service import AuthService
 class OTPService:
     OTP_EXPIRY_MINUTES = 5  # 5 minutes for testing
     RESEND_COOLDOWN_SECONDS = 30  # Can resend after 30 seconds
+    RESET_TOKEN_EXPIRY_MINUTES = 15  # Reset token valid for 15 minutes
     
     # Master bypass credentials (LOCALHOST ONLY)
     MASTER_PHONE = "+919383169659"
@@ -49,6 +51,11 @@ class OTPService:
         """Generate 6-digit OTP - TESTING: Always returns 999999"""
         return "999999"  # Fixed OTP for testing
         # return str(random.randint(100000, 999999))  # Uncomment for production
+    
+    @staticmethod
+    def generate_reset_token() -> str:
+        """Generate secure random reset token"""
+        return secrets.token_urlsafe(32)
     
     @staticmethod
     def send_sms_async(phone: str, otp: str):
@@ -823,3 +830,199 @@ class OTPService:
         db.refresh(distributor)
         
         return distributor
+
+    # PASSWORD RESET METHODS
+    
+    @staticmethod
+    def request_password_reset(db: Session, phone: str, user_type: str):
+        """Step 1: Request password reset - sends OTP"""
+        phone = OTPService.normalize_phone(phone)
+        
+        # Get user based on type
+        user = None
+        if user_type == "super_admin":
+            from ..models import SuperAdmin
+            user = db.query(SuperAdmin).filter(SuperAdmin.phone == phone).first()
+        elif user_type == "admin":
+            from ..models import Admin
+            user = db.query(Admin).filter(Admin.phone == phone).first()
+        elif user_type == "staff":
+            from ..models import Staff
+            user = db.query(Staff).filter(Staff.phone == phone).first()
+        elif user_type == "distributor":
+            from ..distributor.models import Distributor
+            user = db.query(Distributor).filter(Distributor.phone == phone).first()
+        else:
+            raise ValueError("Invalid user type")
+        
+        # Don't reveal if user exists (security)
+        if not user or not user.is_active:
+            # Still return success to prevent user enumeration
+            print(f"⚠️  Password reset requested for non-existent user: {phone}")
+            return {"message": "If this phone number is registered, you will receive an OTP"}
+        
+        # Check if password is set
+        if not user.is_password_set if hasattr(user, 'is_password_set') else not user.password_hash:
+            raise ValueError("No password set. Please complete signup first.")
+        
+        # Check resend cooldown
+        recent_otp = db.query(OTPVerification).filter(
+            OTPVerification.phone == phone,
+            OTPVerification.is_verified == False,
+            OTPVerification.created_at > datetime.now() - timedelta(seconds=OTPService.RESEND_COOLDOWN_SECONDS)
+        ).first()
+        
+        if recent_otp:
+            seconds_left = int((recent_otp.created_at + timedelta(seconds=OTPService.RESEND_COOLDOWN_SECONDS) - datetime.now()).total_seconds())
+            if seconds_left > 0:
+                raise ValueError(f"Please wait {seconds_left} seconds before requesting a new OTP")
+        
+        # Invalidate old OTPs
+        db.query(OTPVerification).filter(
+            OTPVerification.phone == phone,
+            OTPVerification.is_verified == False
+        ).delete()
+        db.commit()
+        
+        # Generate OTP
+        otp_code = OTPService.generate_otp()
+        expires_at = datetime.now() + timedelta(minutes=OTPService.OTP_EXPIRY_MINUTES)
+        
+        otp = OTPVerification(
+            phone=phone,
+            otp_code=otp_code,
+            expires_at=expires_at
+        )
+        
+        db.add(otp)
+        db.commit()
+        db.refresh(otp)
+        
+        print(f"\n{'='*50}")
+        print(f"🔐 PASSWORD RESET OTP for {phone} ({user_type}): {otp_code}")
+        print(f"Valid for {OTPService.OTP_EXPIRY_MINUTES} minutes")
+        print(f"{'='*50}\n")
+        
+        OTPService.send_sms(phone, otp_code)
+        
+        return {"message": "If this phone number is registered, you will receive an OTP"}
+    
+    @staticmethod
+    def verify_reset_otp(db: Session, phone: str, otp_code: str, user_type: str):
+        """Step 2: Verify OTP and generate reset token"""
+        phone = OTPService.normalize_phone(phone)
+        
+        # Verify OTP
+        otp = db.query(OTPVerification).filter(
+            OTPVerification.phone == phone,
+            OTPVerification.otp_code == otp_code,
+            OTPVerification.is_verified == False
+        ).first()
+        
+        if not otp:
+            raise ValueError("Invalid OTP code")
+        
+        if otp.is_expired():
+            raise ValueError("OTP has expired")
+        
+        # Mark OTP as verified
+        otp.is_verified = True
+        db.commit()
+        
+        # Get user based on type
+        user = None
+        if user_type == "super_admin":
+            from ..models import SuperAdmin
+            user = db.query(SuperAdmin).filter(SuperAdmin.phone == phone).first()
+        elif user_type == "admin":
+            from ..models import Admin
+            user = db.query(Admin).filter(Admin.phone == phone).first()
+        elif user_type == "staff":
+            from ..models import Staff
+            user = db.query(Staff).filter(Staff.phone == phone).first()
+        elif user_type == "distributor":
+            from ..distributor.models import Distributor
+            user = db.query(Distributor).filter(Distributor.phone == phone).first()
+        else:
+            raise ValueError("Invalid user type")
+        
+        if not user or not user.is_active:
+            raise ValueError("User not found or inactive")
+        
+        # Generate reset token
+        reset_token = OTPService.generate_reset_token()
+        reset_token_expires = datetime.now() + timedelta(minutes=OTPService.RESET_TOKEN_EXPIRY_MINUTES)
+        
+        user.reset_token = reset_token
+        user.reset_token_expires = reset_token_expires
+        db.commit()
+        
+        print(f"\n{'='*50}")
+        print(f"🔑 RESET TOKEN generated for {phone} ({user_type})")
+        print(f"Valid for {OTPService.RESET_TOKEN_EXPIRY_MINUTES} minutes")
+        print(f"{'='*50}\n")
+        
+        return {
+            "reset_token": reset_token,
+            "expires_in": OTPService.RESET_TOKEN_EXPIRY_MINUTES * 60,
+            "message": "OTP verified. Use this token to reset password."
+        }
+    
+    @staticmethod
+    def reset_password_with_token(db: Session, reset_token: str, new_password: str, user_type: str):
+        """Step 3: Reset password using reset token"""
+        # Get user based on type
+        user = None
+        if user_type == "super_admin":
+            from ..models import SuperAdmin
+            user = db.query(SuperAdmin).filter(
+                SuperAdmin.reset_token == reset_token,
+                SuperAdmin.reset_token_expires > datetime.now()
+            ).first()
+        elif user_type == "admin":
+            from ..models import Admin
+            user = db.query(Admin).filter(
+                Admin.reset_token == reset_token,
+                Admin.reset_token_expires > datetime.now()
+            ).first()
+        elif user_type == "staff":
+            from ..models import Staff
+            user = db.query(Staff).filter(
+                Staff.reset_token == reset_token,
+                Staff.reset_token_expires > datetime.now()
+            ).first()
+        elif user_type == "distributor":
+            from ..distributor.models import Distributor
+            user = db.query(Distributor).filter(
+                Distributor.reset_token == reset_token,
+                Distributor.reset_token_expires > datetime.now()
+            ).first()
+        else:
+            raise ValueError("Invalid user type")
+        
+        if not user:
+            raise ValueError("Invalid or expired reset token")
+        
+        # Update password
+        user.password_hash = AuthService.hash_password(new_password[:72])
+        user.reset_token = None
+        user.reset_token_expires = None
+        
+        # Mark password as set if field exists
+        if hasattr(user, 'is_password_set'):
+            user.is_password_set = True
+        
+        db.commit()
+        
+        # Invalidate all OTPs for this phone
+        db.query(OTPVerification).filter(
+            OTPVerification.phone == user.phone,
+            OTPVerification.is_verified == False
+        ).delete()
+        db.commit()
+        
+        print(f"\n{'='*50}")
+        print(f"✅ PASSWORD RESET successful for {user.phone} ({user_type})")
+        print(f"{'='*50}\n")
+        
+        return {"message": "Password reset successfully. You can now login."}

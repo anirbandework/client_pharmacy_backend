@@ -52,6 +52,10 @@ class Distributor(Base):
     is_active = Column(Boolean, default=True)
     is_verified = Column(Boolean, default=False)
     
+    # Password reset fields
+    reset_token = Column(String, nullable=True)
+    reset_token_expires = Column(DateTime, nullable=True)
+    
     # Audit fields
     created_by_super_admin = Column(String, nullable=False)  # SuperAdmin who created
     updated_by_super_admin = Column(String, nullable=True)

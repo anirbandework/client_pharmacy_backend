@@ -7,7 +7,8 @@ from pydantic import BaseModel
 from . import schemas, models
 from .service import AuthService
 from .dependencies import get_current_admin, get_current_staff, get_current_super_admin, require_permission
-from .otp import OTPService, SendOTPRequest, VerifyOTPRequest, OTPResponse
+from .otp.service import OTPService
+from .otp.schemas import SendOTPRequest, VerifyOTPRequest, OTPResponse
 from app.utils.cache import dashboard_cache
 
 router = APIRouter()
@@ -925,3 +926,48 @@ def verify_staff_password(
         raise HTTPException(status_code=401, detail="Invalid password")
     
     return {"verified": True, "message": "Password verified successfully"}
+
+# PASSWORD RESET ROUTES (ALL USER TYPES)
+
+@router.post("/forgot-password")
+def forgot_password(
+    request: schemas.PasswordResetRequest,
+    db: Session = Depends(get_db)
+):
+    """Request password reset - sends OTP to phone"""
+    try:
+        print(f"📞 Password reset request: phone={request.phone}, user_type={request.user_type}")
+        result = OTPService.request_password_reset(db, request.phone, request.user_type)
+        return result
+    except ValueError as e:
+        print(f"❌ Password reset error: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        print(f"❌ Unexpected error in forgot_password: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/verify-reset-otp")
+def verify_reset_otp(
+    request: schemas.PasswordResetVerifyOTP,
+    db: Session = Depends(get_db)
+):
+    """Verify OTP and get reset token"""
+    try:
+        result = OTPService.verify_reset_otp(db, request.phone, request.otp, request.user_type)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/reset-password")
+def reset_password(
+    request: schemas.PasswordResetConfirm,
+    db: Session = Depends(get_db)
+):
+    """Reset password using reset token"""
+    try:
+        result = OTPService.reset_password_with_token(db, request.reset_token, request.new_password, request.user_type)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
