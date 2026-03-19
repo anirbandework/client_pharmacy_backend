@@ -127,8 +127,8 @@ allowed_origins = [
     "http://localhost:5173",  # Local Vite dev
     "http://localhost:3000",  # Alternative local
     "https://client-pharmacy-frontend.vercel.app",  # Old Vercel
-    "https://xyz.com",  # Production domain
-    "https://www.xyz.com",  # Production domain with www
+    "https://indusinfotechs.com",                      # Production domain
+    "https://www.indusinfotechs.com",                  # Production domain with www
 ]
 
 # Allow all Vercel preview deployments
