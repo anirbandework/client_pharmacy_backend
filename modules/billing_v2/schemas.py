@@ -2,6 +2,7 @@ from pydantic import BaseModel, field_validator
 from typing import Optional, List
 from datetime import datetime
 from .models import PaymentMethod
+from typing import Dict, Any
 
 class BillItemCreate(BaseModel):
     stock_item_id: int
@@ -52,6 +53,7 @@ class BillCreate(BaseModel):
     payment_reference: Optional[str] = None
     
     discount_amount: float = 0.0
+    is_pay_later: bool = False
     notes: Optional[str] = None
     prescription_required: Optional[str] = None
     items: List[BillItemCreate]
@@ -93,11 +95,13 @@ class BillResponse(BaseModel):
     total_amount: float
     amount_paid: float
     change_returned: float
+    payment_status: str
+    amount_due: float
     notes: Optional[str]
     prescription_required: Optional[str]
     created_at: datetime
     items: List[BillItemResponse]
-    
+
     class Config:
         from_attributes = True
 
@@ -123,3 +127,48 @@ class BillSummary(BaseModel):
     card_sales: float
     online_sales: float
     average_bill_value: float
+
+
+class PayLaterBillSummary(BaseModel):
+    id: int
+    bill_number: str
+    total_amount: float
+    amount_paid: float
+    amount_due: float
+    payment_status: str
+    created_at: datetime
+    items_count: int
+    notes: Optional[str]
+
+    class Config:
+        from_attributes = True
+
+class PayLaterCustomer(BaseModel):
+    customer_name: Optional[str]
+    customer_phone: str
+    total_due: float
+    bill_count: int
+    oldest_bill_date: datetime
+    bills: List[PayLaterBillSummary]
+
+class RecordPaymentRequest(BaseModel):
+    customer_phone: str
+    cash_amount: float = 0.0
+    card_amount: float = 0.0
+    online_amount: float = 0.0
+    payment_reference: Optional[str] = None
+    notes: Optional[str] = None
+
+    @field_validator('cash_amount', 'card_amount', 'online_amount')
+    @classmethod
+    def validate_amounts(cls, v):
+        if v < 0:
+            raise ValueError('Amount cannot be negative')
+        return v
+
+class RecordPaymentResponse(BaseModel):
+    message: str
+    total_paid: float
+    bills_cleared: int
+    remaining_due: float
+    applied_to: List[dict]

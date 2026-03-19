@@ -16,11 +16,39 @@ def get_table_columns(engine, table_name):
     return columns
 
 def compare_schemas():
-    local_engine = create_engine(LOCAL_DB)
-    prod_engine = create_engine(PROD_DB)
+    # Add connection timeout and pool settings
+    local_engine = create_engine(
+        LOCAL_DB,
+        connect_args={'connect_timeout': 10}
+    )
+    prod_engine = create_engine(
+        PROD_DB,
+        connect_args={'connect_timeout': 10},
+        pool_pre_ping=True  # Verify connections before using
+    )
     
-    local_inspector = inspect(local_engine)
-    prod_inspector = inspect(prod_engine)
+    print("Connecting to LOCAL database...")
+    try:
+        local_inspector = inspect(local_engine)
+        print("✅ Connected to LOCAL database")
+    except Exception as e:
+        print(f"❌ Failed to connect to LOCAL database: {e}")
+        raise
+    
+    print("Connecting to PRODUCTION database...")
+    try:
+        prod_inspector = inspect(prod_engine)
+        print("✅ Connected to PRODUCTION database")
+    except Exception as e:
+        print(f"\n❌ Failed to connect to PRODUCTION database")
+        print(f"\nPossible causes:")
+        print("  1. Database service is down or paused (check Railway dashboard)")
+        print("  2. Network/firewall blocking the connection")
+        print("  3. Incorrect credentials in PRODUCTION_DATABASE_URL")
+        print("  4. IP whitelist restrictions on the database")
+        print(f"\nOriginal error: {e}")
+        local_engine.dispose()
+        raise
     
     local_tables = set(local_inspector.get_table_names())
     prod_tables = set(prod_inspector.get_table_names())

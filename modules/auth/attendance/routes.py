@@ -126,6 +126,7 @@ def get_wifi_status(
             "can_access_modules": True,  # Admin can always access
             "is_inside_geofence": True,
             "allow_any_network": settings.allow_any_network if settings else False,
+            "geofence_required": settings.geofence_required if settings else True,
             "connected_staff_count": connected_count,
             "message": f"{connected_count} staff currently connected"
         }
@@ -146,24 +147,29 @@ def get_wifi_status(
     ).first()
     
     is_checked_in = attendance and attendance.check_in_time and not attendance.check_out_time
-    
+
     # Check if user is currently inside geofence (successful heartbeat within last 2 minutes)
     is_inside_geofence = False
     if attendance and attendance.updated_at:
         time_since_last_heartbeat = (datetime.now() - attendance.updated_at).total_seconds() / 60
         # User is inside if last heartbeat was successful (no error) and within 2 minutes
         is_inside_geofence = time_since_last_heartbeat < 2 and not attendance.last_error
-    
+
+    geofence_required = settings.geofence_required if settings else True
+
+    # If geofence not required: any recent heartbeat (WiFi SSID match) is sufficient
+    # If geofence required: must be inside geofence (GPS validated)
     can_access_modules = is_inside_geofence or (settings and settings.allow_any_network)
-    
+
     # Get location error from attendance record
     location_error = attendance.last_error if attendance else None
-    
+
     return {
         "is_checked_in": is_checked_in,
         "can_access_modules": can_access_modules,
         "is_inside_geofence": is_inside_geofence,
         "allow_any_network": settings.allow_any_network if settings else False,
+        "geofence_required": geofence_required,
         "attendance": attendance,
         "location_error": location_error,
         "message": "Inside shop - Active session" if is_inside_geofence else "Outside shop"

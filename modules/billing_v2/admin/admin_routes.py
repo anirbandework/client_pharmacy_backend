@@ -599,3 +599,130 @@ def get_admin_profit_analysis(
     if not search:
         dashboard_cache.set(cache_key, result, ttl=60)
     return result
+
+# ─── PAY LATER (ADMIN) ────────────────────────────────────────────────────────
+
+@router.get("/admin/pay-later/customers")
+def admin_get_pay_later_customers(
+    shop_id: Optional[int] = Query(None),
+    from_date: Optional[date] = None,
+    to_date: Optional[date] = None,
+    db: Session = Depends(get_db),
+    admin: Admin = Depends(get_current_admin)
+):
+    """Get all customers with outstanding Pay Later balances (org-scoped, optional shop/date filter)"""
+    from modules.billing_v2.services import BillingService
+    from sqlalchemy import func as sqlfunc
+
+    q = (
+        db.query(models.Bill)
+        .join(Shop, models.Bill.shop_id == Shop.id)
+        .filter(
+            Shop.organization_id == admin.organization_id,
+            models.Bill.payment_status.in_(['pay_later', 'partial'])
+        )
+    )
+    if shop_id:
+        q = q.filter(models.Bill.shop_id == shop_id)
+    if from_date:
+        q = q.filter(func.date(models.Bill.created_at) >= from_date)
+    if to_date:
+        q = q.filter(func.date(models.Bill.created_at) <= to_date)
+
+    bills = q.order_by(models.Bill.created_at.asc()).all()
+
+    from collections import defaultdict
+    groups = defaultdict(list)
+    for b in bills:
+        groups[b.customer_phone].append(b)
+
+    result = []
+    for phone, customer_bills in groups.items():
+        total_due = sum(b.amount_due for b in customer_bills)
+        result.append({
+            "customer_phone": phone,
+            "customer_name": customer_bills[0].customer_name,
+            "total_due": round(total_due, 2),
+            "bill_count": len(customer_bills),
+            "bills": [
+                {
+                    "id": b.id,
+                    "bill_number": b.bill_number,
+                    "total_amount": b.total_amount,
+                    "amount_paid": b.amount_paid,
+                    "amount_due": b.amount_due,
+                    "payment_status": b.payment_status,
+                    "created_at": b.created_at.isoformat(),
+                    "notes": b.notes,
+                    "items_count": len(b.items),
+                }
+                for b in customer_bills
+            ]
+        })
+
+    result.sort(key=lambda x: x["total_due"], reverse=True)
+    return result
+
+
+@router.get("/admin/pay-later/bills/{customer_phone}")
+def admin_get_pay_later_bills(
+    customer_phone: str,
+    shop_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    admin: Admin = Depends(get_current_admin)
+):
+    """Get outstanding Pay Later bills for a customer (org-scoped)"""
+    q = (
+        db.query(models.Bill)
+        .join(Shop, models.Bill.shop_id == Shop.id)
+        .filter(
+            Shop.organization_id == admin.organization_id,
+            models.Bill.customer_phone == customer_phone,
+            models.Bill.payment_status.in_(['pay_later', 'partial'])
+        )
+    )
+    if shop_id:
+        q = q.filter(models.Bill.shop_id == shop_id)
+    return q.order_by(models.Bill.created_at.asc()).all()
+
+
+@router.post("/admin/pay-later/record-payment")
+def admin_record_pay_later_payment(
+    payment: dict,
+    shop_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    admin: Admin = Depends(get_current_admin)
+):
+    """Record a payment for a customer's outstanding Pay Later bills (org-scoped, FIFO)"""
+    from modules.billing_v2.services import BillingService
+
+    # Resolve the shop_id: use provided shop_id or infer from first matching bill
+    customer_phone = payment.get("customer_phone")
+    if not customer_phone:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="customer_phone is required")
+
+    if not shop_id:
+        # Find first outstanding bill to get shop_id
+        bill = (
+            db.query(models.Bill)
+            .join(Shop, models.Bill.shop_id == Shop.id)
+            .filter(
+                Shop.organization_id == admin.organization_id,
+                models.Bill.customer_phone == customer_phone,
+                models.Bill.payment_status.in_(['pay_later', 'partial'])
+            )
+            .order_by(models.Bill.created_at.asc())
+            .first()
+        )
+        if not bill:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="No outstanding bills found for this customer")
+        shop_id = bill.shop_id
+
+    try:
+        result = BillingService.record_payment(db, shop_id, payment)
+        return result
+    except ValueError as e:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail=str(e))

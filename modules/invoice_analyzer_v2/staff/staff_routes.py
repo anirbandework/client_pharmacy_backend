@@ -334,10 +334,21 @@ async def upload_invoice_pdf(
             total_amount=item_data.get("total_amount", 0.0)
         )
         db.add(item)
-    
-    db.commit()
+
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        if "uq_purchase_invoices_shop_number" in str(e) or "unique" in str(e).lower():
+            raise HTTPException(
+                status_code=409,
+                detail=f"Invoice number '{invoice_number}' already exists for this shop."
+            )
+        raise HTTPException(status_code=500, detail=f"Failed to save invoice: {str(e)}")
     db.refresh(invoice)
-    
+
     return invoice
 
 @router.get("/")
@@ -426,7 +437,13 @@ def update_invoice(
     
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
-    
+
+    if invoice.is_admin_verified:
+        raise HTTPException(
+            status_code=403,
+            detail="Cannot edit an admin-verified invoice. Contact your admin to make changes."
+        )
+
     # Parse dates
     def parse_date(date_obj):
         if isinstance(date_obj, str):

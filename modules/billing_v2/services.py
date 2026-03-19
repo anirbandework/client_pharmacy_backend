@@ -142,20 +142,30 @@ class BillingService:
             subtotal += item_subtotal
             tax_amount += item_tax
         
-        # Apply bill-level discount
+        # Apply bill-level discount before tax (discount reduces the taxable base)
         discount_amount = bill_data.get('discount_amount', 0.0)
-        total_amount = subtotal - discount_amount + tax_amount
+        tax_amount = tax_amount * ((subtotal - discount_amount) / subtotal) if subtotal > 0 else 0.0
+        total_amount = (subtotal - discount_amount) + tax_amount
         
         # Calculate total paid and change
         cash_amount = bill_data.get('cash_amount', 0.0)
         card_amount = bill_data.get('card_amount', 0.0)
         online_amount = bill_data.get('online_amount', 0.0)
         amount_paid = cash_amount + card_amount + online_amount
-        
-        if amount_paid < total_amount:
-            raise ValueError(f"Insufficient payment. Total: {total_amount}, Paid: {amount_paid}")
-        
-        change_returned = max(0, amount_paid - total_amount)
+        is_pay_later = bill_data.get('is_pay_later', False)
+
+        if is_pay_later:
+            if not bill_data.get('customer_phone'):
+                raise ValueError("Customer phone number is required for Pay Later bills.")
+            amount_due = round(max(0.0, total_amount - amount_paid), 2)
+            payment_status = 'pay_later' if amount_paid == 0 else 'partial'
+            change_returned = 0.0
+        else:
+            if amount_paid < total_amount - 0.01:  # 1 paisa tolerance for floating point
+                raise ValueError(f"Insufficient payment. Total: {total_amount}, Paid: {amount_paid}")
+            amount_due = 0.0
+            payment_status = 'paid'
+            change_returned = max(0.0, amount_paid - total_amount)
         
         # Generate bill number
         bill_number = BillingService.generate_bill_number(db, shop_id)
@@ -182,6 +192,8 @@ class BillingService:
             total_amount=total_amount,
             amount_paid=amount_paid,
             change_returned=change_returned,
+            payment_status=payment_status,
+            amount_due=amount_due,
             notes=bill_data.get('notes'),
             prescription_required=bill_data.get('prescription_required')
         )
@@ -263,6 +275,7 @@ class BillingService:
             else:
                 strips_deducted = item_data['quantity']
 
+            bill_item.strips_deducted = strips_deducted
             stock_item.quantity_software -= strips_deducted
             if stock_item.quantity_physical is not None:
                 stock_item.audit_discrepancy = stock_item.quantity_software - stock_item.quantity_physical
@@ -272,6 +285,125 @@ class BillingService:
         db.refresh(bill)
         return bill
     
+    @staticmethod
+    def get_pay_later_customers(
+        db: Session,
+        shop_id: int,
+        from_date: Optional[date] = None,
+        to_date: Optional[date] = None,
+    ) -> List[Dict[str, Any]]:
+        """Get all customers with outstanding Pay Later balances, sorted by total due desc."""
+        q = db.query(Bill).filter(
+            Bill.shop_id == shop_id,
+            Bill.payment_status.in_(['pay_later', 'partial']),
+            Bill.amount_due > 0
+        )
+        if from_date:
+            q = q.filter(func.date(Bill.created_at) >= from_date)
+        if to_date:
+            q = q.filter(func.date(Bill.created_at) <= to_date)
+        outstanding_bills = q.order_by(Bill.created_at.asc()).all()
+
+        customer_map: Dict[str, Dict] = {}
+        for bill in outstanding_bills:
+            phone = bill.customer_phone
+            if phone not in customer_map:
+                customer_map[phone] = {
+                    'customer_name': bill.customer_name,
+                    'customer_phone': phone,
+                    'total_due': 0.0,
+                    'bill_count': 0,
+                    'oldest_bill_date': bill.created_at,
+                    'bills': []
+                }
+            customer_map[phone]['total_due'] += bill.amount_due
+            customer_map[phone]['bill_count'] += 1
+            customer_map[phone]['bills'].append({
+                'id': bill.id,
+                'bill_number': bill.bill_number,
+                'total_amount': bill.total_amount,
+                'amount_paid': bill.amount_paid,
+                'amount_due': bill.amount_due,
+                'payment_status': bill.payment_status,
+                'created_at': bill.created_at,
+                'items_count': len(bill.items),
+                'notes': bill.notes,
+            })
+
+        result = sorted(customer_map.values(), key=lambda x: x['total_due'], reverse=True)
+        for c in result:
+            c['total_due'] = round(c['total_due'], 2)
+        return result
+
+    @staticmethod
+    def record_payment(db: Session, shop_id: int, payment_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Record payment for a customer's outstanding bills (oldest first / FIFO)."""
+        customer_phone = payment_data['customer_phone']
+        cash_amount = payment_data.get('cash_amount', 0.0)
+        card_amount = payment_data.get('card_amount', 0.0)
+        online_amount = payment_data.get('online_amount', 0.0)
+        total_payment = cash_amount + card_amount + online_amount
+
+        if total_payment <= 0:
+            raise ValueError("Payment amount must be greater than zero.")
+
+        outstanding_bills = db.query(Bill).filter(
+            Bill.shop_id == shop_id,
+            Bill.customer_phone == customer_phone,
+            Bill.payment_status.in_(['pay_later', 'partial']),
+            Bill.amount_due > 0
+        ).order_by(Bill.created_at.asc()).all()
+
+        if not outstanding_bills:
+            raise ValueError(f"No outstanding bills found for {customer_phone}.")
+
+        total_due = sum(b.amount_due for b in outstanding_bills)
+        if total_payment > total_due + 0.01:
+            raise ValueError(f"Payment ₹{total_payment:.2f} exceeds outstanding balance ₹{total_due:.2f}.")
+
+        remaining = total_payment
+        bills_cleared = 0
+        applied_to = []
+        # Distribute cash/card/online proportionally across bills
+        pay_ratio = total_payment / total_due if total_due > 0 else 1
+
+        for bill in outstanding_bills:
+            if remaining <= 0.001:
+                break
+            apply = min(remaining, bill.amount_due)
+            # Distribute payment methods proportionally to this bill's share
+            bill_ratio = apply / total_payment if total_payment > 0 else 0
+            bill.cash_amount += round(cash_amount * bill_ratio, 2)
+            bill.card_amount += round(card_amount * bill_ratio, 2)
+            bill.online_amount += round(online_amount * bill_ratio, 2)
+            bill.amount_paid = round(bill.amount_paid + apply, 2)
+            bill.amount_due = round(max(0.0, bill.amount_due - apply), 2)
+            if bill.amount_due < 0.01:
+                bill.amount_due = 0.0
+                bill.payment_status = 'paid'
+                bills_cleared += 1
+            else:
+                bill.payment_status = 'partial'
+            if payment_data.get('payment_reference'):
+                bill.payment_reference = payment_data['payment_reference']
+            applied_to.append({
+                'bill_number': bill.bill_number,
+                'applied': round(apply, 2),
+                'remaining_due': bill.amount_due,
+                'cleared': bill.payment_status == 'paid'
+            })
+            remaining = round(remaining - apply, 2)
+
+        db.commit()
+        remaining_due = sum(b.amount_due for b in outstanding_bills)
+        return {
+            'message': f'Payment of ₹{total_payment:.2f} recorded successfully.',
+            'total_paid': round(total_payment, 2),
+            'bills_cleared': bills_cleared,
+            'remaining_due': round(remaining_due, 2),
+            'applied_to': applied_to
+        }
+
     @staticmethod
     def get_bill_summary(
         db: Session,

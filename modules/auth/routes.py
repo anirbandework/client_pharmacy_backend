@@ -262,7 +262,7 @@ def get_analytics(
     recent_shops = db.query(models.Shop).filter(models.Shop.created_at >= thirty_days_ago).count()
     recent_staff = db.query(models.Staff).filter(models.Staff.created_at >= thirty_days_ago).count()
     
-    return {
+    result = {
         "summary": {
             "total_organizations": len(org_ids),
             "total_admins": db.query(models.Admin).count(),
@@ -282,7 +282,7 @@ def get_analytics(
             "staff": recent_staff
         }
     }
-    
+
     # Cache result
     dashboard_cache.set("analytics", result)
     return result

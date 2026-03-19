@@ -63,6 +63,7 @@ class ModuleWithPermission(Module):
     admin_enabled: bool
     staff_enabled: bool
     tab_permissions: Optional[dict] = None  # {tab_key: bool}
+    locked: bool = False  # True when module exists but user's org doesn't have access (needs upgrade)
 
 class UserPermissionsResponse(BaseModel):
     user_type: str
